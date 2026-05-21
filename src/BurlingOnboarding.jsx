@@ -30,6 +30,16 @@ const ENTITY_DOCS = {
 };
 const ENTITY_TYPES = Object.keys(ENTITY_DOCS);
 
+const USER_ROLES = ["employee", "client", "compliance", "admin"];
+
+const PROCESS_DOCS = [
+  { id: "doc-app", name: "Account Application", category: "Account Forms", fileUrl: "/docs/account-application.pdf" },
+  { id: "doc-cma", name: "Cash Management Agreement", category: "Account Forms", fileUrl: "/docs/cash-management-agreement.pdf" },
+  { id: "doc-pp", name: "Positive Pay Form", category: "Account Forms", fileUrl: "/docs/positive-pay-form.pdf" },
+  { id: "doc-sig", name: "Signature Card", category: "Account Forms", fileUrl: null },
+  { id: "doc-wp", name: "Compliance Welcome Packet", category: "Compliance", fileUrl: null },
+];
+
 const IC = {
   Plus: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
   Upload: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
@@ -55,6 +65,19 @@ const btnS = { ...btnBase, background: T.surfaceAlt, color: T.textSecondary, pad
 const btnDanger = { ...btnBase, background: T.dangerBg, color: T.danger, padding: "7px 14px", fontSize: 11 };
 const inp = { width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: T.white, color: T.text };
 const sel = { ...inp, cursor: "pointer" };
+const labelSm = { fontSize: 11, fontWeight: 700, color: T.navy, display: "block", marginBottom: 5 };
+
+const ROLE_STYLE = {
+  admin: { bg: "#ECE7F8", color: "#5B3FA8" },
+  employee: { bg: "#EDF5FB", color: "#2A6FA8" },
+  client: { bg: "#E6F4ED", color: "#1B7A4A" },
+  compliance: { bg: "#FFF8F0", color: "#8B5E2B" },
+};
+
+const RolePill = ({ role }) => {
+  const s = ROLE_STYLE[role] || { bg: "#F0F3F6", color: "#5A6577" };
+  return <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{role}</span>;
+};
 
 const STATUS_MAP = {
   action_needed: { label: "Action Needed", bg: T.warningBg, color: T.warning },
@@ -160,6 +183,12 @@ export default function BurlingOnboarding() {
   const [compDocInput, setCompDocInput] = useState("");
   const [compExplanation, setCompExplanation] = useState("");
 
+  // Admin state
+  const [users, setUsers] = useState([{ id: "u-admin", name: "Account Owner", email: "jackpmullen5@gmail.com", role: "admin", createdAt: new Date().toLocaleDateString() }]);
+  const [uf, setUf] = useState({ name: "", email: "", role: "employee" });
+  const [docLib, setDocLib] = useState(PROCESS_DOCS);
+  const [docForm, setDocForm] = useState({ name: "", category: "Account Forms" });
+
   const [sigDoc, setSigDoc] = useState(null);
   const [toast, setToast] = useState({ msg: "", visible: false });
   const toastTimer = useRef(null);
@@ -185,6 +214,8 @@ export default function BurlingOnboarding() {
 
   const isClient = role === "client";
   const isEmployee = role === "employee";
+  const isAdmin = role === "admin";
+  const isManager = isEmployee || isAdmin;
 
   // Update an opp in the array
   const updateOpp = (id, fn) => setOpps(prev => prev.map(o => o.id === id ? fn(o) : o));
@@ -313,6 +344,21 @@ export default function BurlingOnboarding() {
     show(opp.onHold ? `${opp.client} resumed` : `${opp.client} placed on hold`);
   };
 
+  // Admin: user + document management
+  const addUser = () => {
+    if (!uf.name.trim() || !uf.email.trim()) return;
+    setUsers(prev => [...prev, { id: `u-${Date.now()}`, name: uf.name.trim(), email: uf.email.trim(), role: uf.role, createdAt: new Date().toLocaleDateString() }]);
+    show(`User ${uf.name.trim()} created`);
+    setUf({ name: "", email: "", role: "employee" });
+  };
+  const removeUser = (id) => setUsers(prev => prev.filter(u => u.id !== id));
+  const addDoc = () => {
+    if (!docForm.name.trim()) return;
+    setDocLib(prev => [...prev, { id: `d-${Date.now()}`, name: docForm.name.trim(), category: docForm.category, fileUrl: null }]);
+    show(`Document "${docForm.name.trim()}" added to library`);
+    setDocForm({ name: "", category: "Account Forms" });
+  };
+
   // Filtered lists for home screen
   const currentlyOnboarding = opps.filter(o => {
     const stage = getOppStage(o);
@@ -391,13 +437,18 @@ export default function BurlingOnboarding() {
               <div style={{ fontSize: 9, color: T.skyLight, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>Client Onboarding</div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             {["employee", "client", "compliance"].map(r => (
-              <button key={r} onClick={() => { setRole(r); if (r === "employee") { setScreen("home"); setActiveOppId(null); } if (r === "client") { setScreen("home"); setActiveOppId(null); } if (r === "compliance") { setScreen("home"); setActiveOppId(null); } }}
+              <button key={r} onClick={() => { setRole(r); setScreen("home"); setActiveOppId(null); setSigDoc(null); }}
                 style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", background: role === r ? "rgba(75,163,217,0.2)" : "transparent", color: role === r ? T.skyLight : "rgba(255,255,255,0.5)", border: `1px solid ${role === r ? "rgba(75,163,217,0.3)" : "transparent"}` }}>
                 {r}
               </button>
             ))}
+            <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.15)", margin: "0 6px" }} />
+            <button onClick={() => { setRole("admin"); setScreen("home"); setActiveOppId(null); setSigDoc(null); }}
+              style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", gap: 5, background: isAdmin ? "rgba(123,92,186,0.4)" : "rgba(255,255,255,0.08)", color: isAdmin ? "#DDD0F2" : "rgba(255,255,255,0.6)", border: `1px solid ${isAdmin ? "rgba(150,120,210,0.55)" : "rgba(255,255,255,0.12)"}` }}>
+              {IC.Lock(11)} Admin
+            </button>
           </div>
         </div>
       </div>
@@ -511,17 +562,17 @@ export default function BurlingOnboarding() {
         )}
 
         {/* ======== DETAIL VIEW ======== */}
-        {showDetail && (role === "employee" || role === "client") && (
+        {showDetail && (role === "employee" || role === "client" || role === "admin") && (
           <div>
-            {isEmployee && <button onClick={goHome} style={{ ...btnS, marginBottom: 14 }}>{IC.Home()} Back to Dashboard</button>}
+            {isManager && <button onClick={goHome} style={{ ...btnS, marginBottom: 14 }}>{IC.Home()} Back to Dashboard</button>}
             <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, color: T.white }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : "Employee View"}</div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : "Employee View"}</div>
                   <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
                   <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : postSendStage === "documents" ? "Document collection in progress" : postSendStage === "signing" ? "Ready for signatures" : postSendStage === "complete" ? "Onboarding complete" : "Pending"}</p>
                 </div>
-                {isEmployee && activeOpp.sent && postSendStage !== "complete" && (
+                {isManager && activeOpp.sent && postSendStage !== "complete" && (
                   <button onClick={() => toggleHold(activeOpp.id)} style={{ ...btnBase, padding: "6px 14px", fontSize: 10, background: activeOpp.onHold ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.1)", color: T.white, border: "1px solid rgba(255,255,255,0.2)" }}>
                     {activeOpp.onHold ? <>{IC.Play(12)} Resume</> : <>{IC.Pause(12)} Hold</>}
                   </button>
@@ -592,7 +643,7 @@ export default function BurlingOnboarding() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <Badge status={doc.status} />
                           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc("clientDocs", doc.id); show("Document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
-                          {isEmployee && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("clientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("clientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
+                          {isManager && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("clientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("clientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
                         </div>
                       </div>
                     ))}
@@ -611,7 +662,7 @@ export default function BurlingOnboarding() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <Badge status={doc.status} />
                           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc("compClientDocs", doc.id); show("Document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
-                          {isEmployee && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("compClientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("compClientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
+                          {isManager && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("compClientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("compClientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
                         </div>
                       </div>
                     ))}
@@ -713,6 +764,107 @@ export default function BurlingOnboarding() {
                 </Card>
               ))
             )}
+          </div>
+        )}
+
+        {/* ======== ADMIN CONSOLE ======== */}
+        {role === "admin" && screen !== "detail" && (
+          <div>
+            <div style={{ background: "linear-gradient(135deg, #1B1438 0%, #3E2D78 100%)", borderRadius: 14, padding: "20px 24px", marginBottom: 18, color: T.white }}>
+              <div style={{ fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.6, marginBottom: 2 }}>Admin Console</div>
+              <h1 style={{ fontSize: 18, fontFamily: "'Playfair Display', serif" }}>Onboarding Administration</h1>
+              <p style={{ fontSize: 11, opacity: 0.7 }}>Manage users, process documents, and oversee every onboarding across all portals.</p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 16 }}>
+              {[
+                { label: "Total Onboardings", value: opps.length, color: T.navy },
+                { label: "In Progress", value: currentlyOnboarding.length, color: T.sky },
+                { label: "Pending Compliance", value: pendingEDD.length, color: T.compText },
+                { label: "On Hold", value: onHold.length, color: T.hold },
+                { label: "Completed", value: opps.filter(o => getOppStage(o) === "complete").length, color: T.success },
+                { label: "Users", value: users.length, color: "#5B3FA8" },
+              ].map(st => (
+                <div key={st.label} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: st.color, fontFamily: "'Playfair Display', serif" }}>{st.value}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{st.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* User Management */}
+            <Card>
+              <CH icon={IC.Plus()} title="User Management" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{users.length}</span>} />
+              <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: "1 1 160px" }}>
+                    <label style={labelSm}>Name</label>
+                    <input value={uf.name} onChange={e => setUf(p => ({ ...p, name: e.target.value }))} style={inp} placeholder="Full name" />
+                  </div>
+                  <div style={{ flex: "1 1 200px" }}>
+                    <label style={labelSm}>Email</label>
+                    <input value={uf.email} onChange={e => setUf(p => ({ ...p, email: e.target.value }))} style={inp} placeholder="name@example.com" />
+                  </div>
+                  <div style={{ flex: "0 1 150px" }}>
+                    <label style={labelSm}>Role</label>
+                    <select value={uf.role} onChange={e => setUf(p => ({ ...p, role: e.target.value }))} style={sel}>
+                      {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={addUser} disabled={!uf.name.trim() || !uf.email.trim()} style={{ ...btnPri, padding: "9px 16px", opacity: uf.name.trim() && uf.email.trim() ? 1 : 0.4 }}>{IC.Plus()} Create User</button>
+                </div>
+              </div>
+              {users.map(u => (
+                <div key={u.id} className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{u.name}</div>
+                    <div style={{ fontSize: 10, color: T.textMuted }}>{u.email} · since {u.createdAt}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <RolePill role={u.role} />
+                    {u.role !== "admin" && <button onClick={() => removeUser(u.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.danger }}>{IC.Trash()}</button>}
+                  </div>
+                </div>
+              ))}
+            </Card>
+
+            {/* Document Library */}
+            <Card>
+              <CH icon={IC.File()} title="Document Library" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{docLib.length}</span>} />
+              <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+                <p style={{ fontSize: 11, color: T.textSecondary, marginBottom: 10 }}>Documents pushed to clients during onboarding. Replace placeholders with official forms when ready.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: "1 1 200px" }}>
+                    <label style={labelSm}>Document Name</label>
+                    <input value={docForm.name} onChange={e => setDocForm(p => ({ ...p, name: e.target.value }))} style={inp} placeholder="e.g. Beneficial Ownership Form" />
+                  </div>
+                  <div style={{ flex: "0 1 170px" }}>
+                    <label style={labelSm}>Category</label>
+                    <select value={docForm.category} onChange={e => setDocForm(p => ({ ...p, category: e.target.value }))} style={sel}>
+                      {["Account Forms", "Compliance", "Other"].map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={addDoc} disabled={!docForm.name.trim()} style={{ ...btnPri, padding: "9px 16px", opacity: docForm.name.trim() ? 1 : 0.4 }}>{IC.Plus()} Add Document</button>
+                </div>
+              </div>
+              {docLib.map(d => (
+                <div key={d.id} className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ color: T.textMuted }}>{IC.File()}</span>
+                    <div><div style={{ fontSize: 12, fontWeight: 600 }}>{d.name}</div><div style={{ fontSize: 10, color: T.textMuted }}>{d.category}</div></div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {d.fileUrl ? <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} View</a> : <span style={{ fontSize: 10, color: T.textMuted, fontStyle: "italic" }}>No file yet</span>}
+                  </div>
+                </div>
+              ))}
+            </Card>
+
+            {/* All Onboardings */}
+            <Card>
+              <CH icon={IC.Home()} title="All Onboardings" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{opps.length}</span>} />
+              {opps.length === 0 ? <EmptyReport msg="No onboardings yet" /> : opps.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+            </Card>
           </div>
         )}
 
