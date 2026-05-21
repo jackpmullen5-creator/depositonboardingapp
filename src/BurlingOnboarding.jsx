@@ -93,10 +93,11 @@ const ROLE_STYLE = {
   client: { bg: "#E6F4ED", color: "#1B7A4A" },
   compliance: { bg: "#FFF8F0", color: "#8B5E2B" },
 };
+const ROLE_LABEL = { admin: "Admin", employee: "Client Services", client: "Client", compliance: "Compliance" };
 
 const RolePill = ({ role }) => {
   const s = ROLE_STYLE[role] || { bg: "#F0F3F6", color: "#5A6577" };
-  return <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{role}</span>;
+  return <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ROLE_LABEL[role] || role}</span>;
 };
 
 const STATUS_MAP = {
@@ -413,8 +414,29 @@ export default function BurlingOnboarding() {
   };
 
   // Doc actions on active opp
-  const uploadDoc = (field, id) => { updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "uploaded", files: [...(d.files || []), { id: newId("f"), name: `${d.name.replace(/[^a-z0-9]+/gi, "_").slice(0, 28)}_${(d.files || []).length + 1}.pdf`, url: "/docs/uploaded-document.pdf" }] } : d) })); logAudit(activeOppId, `Uploaded a file to "${docName(field, id)}"`); };
   const docName = (field, id) => activeOpp?.[field]?.find(x => x.id === id)?.name || "document";
+  const addFiles = (field, id, fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const entry = { id: newId("f"), name: file.name, url: reader.result };
+        updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "uploaded", files: [...(d.files || []), entry] } : d) }));
+      };
+      reader.readAsDataURL(file);
+    });
+    logAudit(activeOppId, `Uploaded ${files.length} file${files.length > 1 ? "s" : ""} to "${docName(field, id)}"`);
+  };
+  const viewFile = (f) => {
+    try {
+      if (f.url && f.url.startsWith("data:")) {
+        fetch(f.url).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), "_blank"));
+      } else if (f.url) {
+        window.open(f.url, "_blank");
+      }
+    } catch { /* ignore */ }
+  };
   const approveDoc = (field, id) => { updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "approved" } : d) })); logAudit(activeOppId, `Approved "${docName(field, id)}"`); };
   const rejectDoc = (field, id) => { updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "rejected", files: [] } : d) })); logAudit(activeOppId, `Rejected "${docName(field, id)}"`); };
   // Status update on an arbitrary opp (used by the compliance portal review surface)
@@ -627,15 +649,17 @@ export default function BurlingOnboarding() {
     );
   };
 
-  // A document bucket: holds one or more uploaded files, with a clickable list and review actions
-  const BucketRow = ({ doc, field, reviewer = "employee", uploader = "client" }) => {
+  // A document bucket with drag-and-drop upload + clickable files.
+  // Called as a function (not <BucketRow/>) so its inputs don't remount on every keystroke/render.
+  const bucketRow = (doc, field, { reviewer = "employee", uploader = "client" } = {}) => {
     const canReview = reviewer === "compliance" ? (isCompliance || isAdmin) : isManager;
     const canUpload = uploader === "employee" ? isManager : isClient;
     const files = doc.files || [];
     const needsUpload = doc.status === "action_needed" || doc.status === "rejected";
     const badgeStatus = needsUpload ? (canUpload ? doc.status : "awaiting_upload") : doc.status;
+    const inputId = `up-${field}-${doc.id}`;
     return (
-      <div style={{ borderBottom: `1px solid ${T.borderLight}` }}>
+      <div key={doc.id} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
         <div className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
             <span style={{ color: T.textMuted }}>{IC.File()}</span>
@@ -644,14 +668,25 @@ export default function BurlingOnboarding() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <Badge status={badgeStatus} />
             {canUpload && doc.template && needsUpload && <a href={doc.template} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} Download &amp; Sign</a>}
-            {canUpload && needsUpload && <button onClick={() => { uploadDoc(field, doc.id); show("Document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
-            {canUpload && doc.status === "uploaded" && <button onClick={() => { uploadDoc(field, doc.id); show("File added"); }} style={btnS}>{IC.Plus(12)} Add File</button>}
-            {canReview && doc.status === "uploaded" && (<><button onClick={() => { approveDoc(field, doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc(field, doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
+            {canReview && doc.status === "uploaded" && (<><button onClick={() => approveDoc(field, doc.id)} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => rejectDoc(field, doc.id)} style={btnDanger}>{IC.X(12)} Reject</button></>)}
           </div>
         </div>
         {files.length > 0 && (
-          <div style={{ padding: "0 20px 10px 44px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {files.map(f => <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: T.sky, textDecoration: "none", background: T.skyPale, border: `1px solid ${T.skyLight}`, borderRadius: 6, padding: "3px 8px" }}>{IC.File(11)} {f.name}</a>)}
+          <div style={{ padding: "0 20px 8px 44px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {files.map(f => <button key={f.id} onClick={() => viewFile(f)} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: T.sky, cursor: "pointer", background: T.skyPale, border: `1px solid ${T.skyLight}`, borderRadius: 6, padding: "3px 8px" }}>{IC.File(11)} {f.name}</button>)}
+          </div>
+        )}
+        {canUpload && doc.status !== "approved" && (
+          <div style={{ padding: "0 20px 12px 44px" }}>
+            <input id={inputId} type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(field, doc.id, e.target.files); e.target.value = ""; }} />
+            <div
+              onClick={() => document.getElementById(inputId)?.click()}
+              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = T.sky; e.currentTarget.style.background = T.skyPale; }}
+              onDragLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.surfaceAlt; }}
+              onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.surfaceAlt; addFiles(field, doc.id, e.dataTransfer.files); }}
+              style={{ border: `1.5px dashed ${T.border}`, background: T.surfaceAlt, borderRadius: 8, padding: "10px 12px", textAlign: "center", cursor: "pointer", fontSize: 11, color: T.textSecondary }}>
+              {IC.Upload(13)} Drag &amp; drop files here, or click to browse{files.length > 0 ? " (add more)" : ""}
+            </div>
           </div>
         )}
       </div>
@@ -733,7 +768,7 @@ export default function BurlingOnboarding() {
                   {["employee", "client", "compliance", "admin"].map(r => (
                     <button key={r} onClick={() => { setRole(r); setScreen("home"); setActiveOppId(null); }}
                       style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", background: role === r ? "rgba(75,163,217,0.2)" : "transparent", color: role === r ? T.skyLight : "rgba(255,255,255,0.5)", border: `1px solid ${role === r ? "rgba(75,163,217,0.3)" : "transparent"}` }}>
-                      {r}
+                      {ROLE_LABEL[r]}
                     </button>
                   ))}
                 </div>
@@ -751,7 +786,7 @@ export default function BurlingOnboarding() {
         {showHome && isEmployee && (
           <div>
             <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, borderRadius: 14, padding: "24px 28px", marginBottom: 20, color: T.white }}>
-              <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 4 }}>Employee Portal</div>
+              <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 4 }}>Client Services Portal</div>
               <h1 style={{ fontSize: 22, fontFamily: "'Playfair Display', serif", marginBottom: 4 }}>Deposit Onboarding</h1>
               <p style={{ fontSize: 12, opacity: 0.7 }}>Configure and send new client onboardings.</p>
             </div>
@@ -886,7 +921,7 @@ export default function BurlingOnboarding() {
             <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, color: T.white }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : isCompliance ? "Compliance View" : "Employee View"}</div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : isCompliance ? "Compliance View" : "Client Services View"}</div>
                   <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
                   <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : isClient && activeOpp.accountOpened ? "Account opened" : PHASE_LABEL[phase] || "In progress"}</p>
                 </div>
@@ -943,7 +978,11 @@ export default function BurlingOnboarding() {
                     <p style={{ fontSize: 11, color: T.textMuted, marginBottom: 10 }}>No packet needed. Reason: "{activeOpp.compExplanation}"</p>
                   )}
                   <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>Send the onboarding email to the client to begin document collection.</p>
-                  <button onClick={() => sendToClient(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Send(16)} Send Onboarding to {activeOpp.client}</button>
+                  {isManager ? (
+                    <button onClick={() => sendToClient(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Send(16)} Send Onboarding to {activeOpp.client}</button>
+                  ) : (
+                    <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>Client Services will send the onboarding to the client.</p>
+                  )}
                 </div>
               </Card>
             )}
@@ -964,7 +1003,7 @@ export default function BurlingOnboarding() {
               </Card>
             )}
 
-            {(isManager || isCompliance) && <CommentThread opp={activeOpp} />}
+            {(isManager || isCompliance) && CommentThread({ opp: activeOpp })}
 
             {activeOpp.sent && !activeOpp.cancelled && (
               <>
@@ -983,31 +1022,43 @@ export default function BurlingOnboarding() {
                     })()}
                   </div>
                 </Card>
+                {(activeOpp.clientDocs.length > 0 || activeOpp.bankDocs.length > 0) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 2px 8px" }}>
+                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.sky }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.navy }}>Client Services</span>
+                  </div>
+                )}
                 {activeOpp.clientDocs.length > 0 && (
                   <Card>
                     <CH icon={IC.File()} title="Account Requests" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.clientDocs.filter(d => d.status === "approved").length}/{activeOpp.clientDocs.length} approved</span>} />
-                    {activeOpp.clientDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="clientDocs" />)}
-                  </Card>
-                )}
-                {activeOpp.compClientDocs.length > 0 && (
-                  <Card s={{ borderColor: T.compBorder }}>
-                    <CH icon={IC.Lock()} title="Compliance Requests" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>{activeOpp.compClientDocs.filter(d => d.status === "approved").length}/{activeOpp.compClientDocs.length} approved</span>} />
-                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>These documents have been requested by our compliance team as part of enhanced due diligence.</p></div>}
-                    {activeOpp.compClientDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="compClientDocs" />)}
+                    {activeOpp.clientDocs.map(doc => bucketRow(doc, "clientDocs"))}
                   </Card>
                 )}
                 {activeOpp.bankDocs.length > 0 && (
                   <Card>
                     <CH icon={IC.Pen()} title="Forms to Download, Sign &amp; Return" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.status === "approved").length}/{activeOpp.bankDocs.length} approved</span>} />
                     {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download each form, sign it, then upload the signed copy.</p></div>}
-                    {activeOpp.bankDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="bankDocs" />)}
+                    {activeOpp.bankDocs.map(doc => bucketRow(doc, "bankDocs"))}
+                  </Card>
+                )}
+                {(activeOpp.compClientDocs.length > 0 || (activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0)) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 2px 8px" }}>
+                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.compText }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.compText }}>Compliance</span>
+                  </div>
+                )}
+                {activeOpp.compClientDocs.length > 0 && (
+                  <Card s={{ borderColor: T.compBorder }}>
+                    <CH icon={IC.Lock()} title="Compliance Requests" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>{activeOpp.compClientDocs.filter(d => d.status === "approved").length}/{activeOpp.compClientDocs.length} approved</span>} />
+                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>These documents have been requested by our compliance team as part of enhanced due diligence.</p></div>}
+                    {activeOpp.compClientDocs.map(doc => bucketRow(doc, "compClientDocs"))}
                   </Card>
                 )}
                 {activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0 && (
                   <Card s={{ borderColor: T.compBorder }}>
                     <CH icon={IC.Lock()} title="Compliance Welcome Packet" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>Reviewed by Compliance</span>} />
                     {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>Download, sign, and upload the compliance welcome packet. It will be reviewed by our compliance team.</p></div>}
-                    {activeOpp.welcomePacketDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="welcomePacketDocs" reviewer="compliance" />)}
+                    {activeOpp.welcomePacketDocs.map(doc => bucketRow(doc, "welcomePacketDocs", { reviewer: "compliance" }))}
                   </Card>
                 )}
 
@@ -1051,7 +1102,7 @@ export default function BurlingOnboarding() {
                   <Card>
                     <CH icon={IC.Pen()} title="Signature Card" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.sigCardDocs.filter(d => d.status === "approved").length}/{activeOpp.sigCardDocs.length} approved</span>} />
                     {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download the signature card, sign it, then upload the signed copy for review.</p></div>}
-                    {activeOpp.sigCardDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="sigCardDocs" />)}
+                    {activeOpp.sigCardDocs.map(doc => bucketRow(doc, "sigCardDocs"))}
                   </Card>
                 )}
 
@@ -1090,7 +1141,7 @@ export default function BurlingOnboarding() {
                     {activeOpp.riskMatrixDocs && activeOpp.riskMatrixDocs.length > 0 && (
                       <Card>
                         <CH icon={IC.File()} title="Risk Rating Matrix" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>Employee uploads · Compliance reviews</span>} />
-                        {activeOpp.riskMatrixDocs.map(doc => <BucketRow key={doc.id} doc={doc} field="riskMatrixDocs" uploader="employee" reviewer="compliance" />)}
+                        {activeOpp.riskMatrixDocs.map(doc => bucketRow(doc, "riskMatrixDocs", { uploader: "employee", reviewer: "compliance" }))}
                       </Card>
                     )}
                     {phase === "create_cip" && (
@@ -1236,7 +1287,7 @@ export default function BurlingOnboarding() {
                     </div>
                   </div>
                 </Card>
-                <CommentThread opp={opp} />
+                {CommentThread({ opp })}
                 </div>
               ))
             )}
@@ -1284,7 +1335,7 @@ export default function BurlingOnboarding() {
                   <div style={{ flex: "0 1 150px" }}>
                     <label style={labelSm}>Role</label>
                     <select value={uf.role} onChange={e => setUf(p => ({ ...p, role: e.target.value }))} style={sel}>
-                      {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      {USER_ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                     </select>
                   </div>
                   <button onClick={addUser} disabled={!uf.name.trim() || !uf.email.trim()} style={{ ...btnPri, padding: "9px 16px", opacity: uf.name.trim() && uf.email.trim() ? 1 : 0.4 }}>{IC.Plus()} Create User</button>
