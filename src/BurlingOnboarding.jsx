@@ -453,7 +453,7 @@ export default function BurlingOnboarding() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <Badge status={docBadge(doc.status)} />
-          {doc.template && doc.status !== "approved" && <a href={doc.template} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} Download &amp; Sign</a>}
+          {isClient && doc.template && doc.status !== "approved" && <a href={doc.template} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} Download &amp; Sign</a>}
           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc(field, doc.id); show("Signed document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
           {canReview && doc.status === "uploaded" && (<><button onClick={() => { approveDoc(field, doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc(field, doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
         </div>
