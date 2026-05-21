@@ -93,6 +93,7 @@ const STATUS_MAP = {
   ready_for_action: { label: "Ready for Action", bg: "#E8F5E9", color: "#2E7D32" },
   awaiting_client: { label: "Awaiting Client", bg: T.pendingBg, color: T.pending },
   review_needed: { label: "Action Needed", bg: T.warningBg, color: T.warning },
+  resume_requested: { label: "Resume Requested", bg: T.warningBg, color: T.warning },
 };
 
 const Badge = ({ status }) => {
@@ -135,18 +136,49 @@ const initialDocsOf = (opp) => [...opp.clientDocs, ...opp.compClientDocs, ...opp
 const allApproved = (arr) => arr.length > 0 && arr.every(d => d.status === "approved");
 const bucketsFull = (arr) => arr.length > 0 && arr.every(d => d.status === "uploaded" || d.status === "approved");
 
+const PHASE_LABEL = {
+  documents: "Document collection in progress",
+  ach_memo: "Documents collected — create ACH memo",
+  management_approval: "Awaiting management approval",
+  send_sig_card: "Deposit and send the signature card",
+  signature_card: "Awaiting signed signature card",
+  create_bolb: "Create BOLB before opening the account",
+  open_account: "Ready to open account",
+  risk_matrix: "Internal — risk rating matrix",
+  risk_review: "Internal — compliance risk review",
+  create_cip: "Internal — create and save CIP",
+  review_cip: "Internal — compliance CIP review",
+  assign_household: "Internal — assign household code",
+  collect_fee: "Internal — collect onboarding fee",
+  complete: "Onboarding closed",
+};
+
+// Post-send phase progression (ignores hold). Returns the current step key.
+const computePhase = (opp) => {
+  if (!allApproved(initialDocsOf(opp))) return "documents";
+  if (!opp.achMemoCreated) return "ach_memo";
+  if (!opp.mgmtApproved) return "management_approval";
+  if (!opp.sigCardSent) return "send_sig_card";
+  if (!allApproved(opp.sigCardDocs || [])) return "signature_card";
+  if (!opp.bolbCreated) return "create_bolb";
+  if (!opp.accountOpened) return "open_account";
+  // internal-only stages, after the account-opened email
+  if (!opp.riskMatrixDone) return "risk_matrix";
+  if (!opp.riskMatrixReviewed) return "risk_review";
+  if (!opp.cipCreated) return "create_cip";
+  if (!opp.cipReviewed) return "review_cip";
+  if (opp.highCompliance === "Yes" && !opp.householdCodeAssigned) return "assign_household";
+  if (opp.highCompliance === "Yes" && !opp.onboardingFeeCollected) return "collect_fee";
+  return "complete";
+};
+
 // Helper: compute stage for an opp
 const getOppStage = (opp) => {
   if (opp.onHold) return "on_hold";
   if (opp.compStatus === "pending_compliance") return "pending_compliance";
   if (!opp.sent && (opp.compStatus === "compliance_ready" || opp.compStatus === "no_packet")) return "ready_for_action";
   if (!opp.sent) return "configuring";
-  if (!allApproved(initialDocsOf(opp))) return "documents";
-  if (!opp.advanced) return "ready_to_advance";
-  if (!opp.sigCardSent) return "send_sig_card";
-  if (!allApproved(opp.sigCardDocs || [])) return "signature_card";
-  if (!opp.accountOpened) return "open_account";
-  return "complete";
+  return computePhase(opp);
 };
 
 // Bank-provided forms the client must download, sign, and upload (reviewed by employee)
@@ -213,6 +245,7 @@ export default function BurlingOnboarding() {
   const isClient = role === "client";
   const isEmployee = role === "employee";
   const isAdmin = role === "admin";
+  const isCompliance = role === "compliance";
   const isManager = isEmployee || isAdmin;
   // From a manager's view, a not-yet-uploaded document is the client's action, not theirs.
   const docBadge = (status) => (isManager && status === "action_needed") ? "awaiting_client" : status;
@@ -253,7 +286,6 @@ export default function BurlingOnboarding() {
       bankDocs: bDocs,
       compClientDocs: cDocs,
       welcomePacketDocs: wpDocs,
-      advanced: false,
       comments: [],
       sigCardSent: false,
       sigCardDocs: [],
@@ -294,7 +326,6 @@ export default function BurlingOnboarding() {
       bankDocs: [],
       compClientDocs: [],
       welcomePacketDocs: [],
-      advanced: false,
       comments: [],
       sigCardSent: false,
       sigCardDocs: [],
@@ -334,7 +365,6 @@ export default function BurlingOnboarding() {
       compClientDocs: cDocs,
       bankDocs: bDocs,
       welcomePacketDocs: wpDocs,
-      advanced: false,
       comments: [],
       sigCardSent: false,
       sigCardDocs: [],
@@ -358,9 +388,18 @@ export default function BurlingOnboarding() {
     setCommentDraft(p => ({ ...p, [id]: "" }));
     show("Comment added");
   };
-  const advanceToSigCard = (id) => {
-    updateOpp(id, o => ({ ...o, advanced: true }));
-    show("Advanced to signature card stage");
+  const completeTask = (id, field, msg) => {
+    updateOpp(id, o => ({ ...o, [field]: true }));
+    show(msg);
+  };
+  const requestResume = (id) => {
+    updateOpp(id, o => ({ ...o, resumeRequested: true }));
+    show("Resume requested — your banker has been notified");
+  };
+  const resumeOpp = (id) => {
+    const opp = opps.find(o => o.id === id);
+    updateOpp(id, o => ({ ...o, onHold: false, resumeRequested: false }));
+    show(`${opp.client} resumed`);
   };
   const sendSigCard = (id) => {
     updateOpp(id, o => ({ ...o, sigCardSent: true, sigCardDocs: [sigCardDoc()], emails: [...o.emails, { type: "sent", subject: `Signature card sent to ${o.client}`, date: new Date().toLocaleDateString() }] }));
@@ -373,7 +412,7 @@ export default function BurlingOnboarding() {
 
   const toggleHold = (id) => {
     const opp = opps.find(o => o.id === id);
-    updateOpp(id, o => ({ ...o, onHold: !o.onHold }));
+    updateOpp(id, o => ({ ...o, onHold: !o.onHold, resumeRequested: false }));
     show(opp.onHold ? `${opp.client} resumed` : `${opp.client} placed on hold`);
   };
 
@@ -395,22 +434,14 @@ export default function BurlingOnboarding() {
   // Filtered lists for home screen
   const currentlyOnboarding = opps.filter(o => {
     const stage = getOppStage(o);
-    return !o.onHold && ["documents", "ready_to_advance", "send_sig_card", "signature_card", "open_account", "ready_for_action"].includes(stage);
+    return !o.onHold && stage !== "complete" && stage !== "pending_compliance" && stage !== "configuring";
   });
   const pendingEDD = opps.filter(o => o.compStatus === "pending_compliance" && !o.onHold);
   const onHold = opps.filter(o => o.onHold);
   const wpPendingReview = opps.filter(o => (o.welcomePacketDocs || []).some(d => d.status === "uploaded"));
 
   // Detail view derived
-  const allInitialApproved = activeOpp ? allApproved(initialDocsOf(activeOpp)) : false;
-  const sigCardApproved = activeOpp ? allApproved(activeOpp.sigCardDocs || []) : false;
-  const phase = !activeOpp?.sent ? "none"
-    : !allInitialApproved ? "documents"
-    : !activeOpp.advanced ? "ready_to_advance"
-    : !activeOpp.sigCardSent ? "send_sig_card"
-    : !sigCardApproved ? "signature_card"
-    : !activeOpp.accountOpened ? "open_account"
-    : "complete";
+  const phase = activeOpp?.sent ? computePhase(activeOpp) : "none";
 
   // Wizard stepper
   const stepLabels = isHighComp ? ["Configure", "Compliance Review", "Send"] : ["Configure", "Send"];
@@ -435,10 +466,10 @@ export default function BurlingOnboarding() {
     let rowStatus;
     if (stage === "on_hold") rowStatus = "on_hold";
     else if (stage === "pending_compliance") rowStatus = "pending_compliance";
-    else if (stage === "ready_for_action" || stage === "ready_to_advance" || stage === "send_sig_card" || stage === "open_account") rowStatus = "ready_for_action";
     else if (stage === "complete") rowStatus = "approved";
+    else if (stage === "documents") rowStatus = (bucketsFull(allDocs) && allDocs.some(d => d.status === "uploaded")) ? "review_needed" : "awaiting_client";
     else if (stage === "signature_card") rowStatus = (opp.sigCardDocs || []).some(d => d.status === "uploaded") ? "review_needed" : "awaiting_client";
-    else rowStatus = (bucketsFull(allDocs) && allDocs.some(d => d.status === "uploaded")) ? "review_needed" : "awaiting_client";
+    else rowStatus = "ready_for_action";
     return (
       <div onClick={onClick} className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 20px", borderBottom: `1px solid ${T.borderLight}`, cursor: "pointer" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
@@ -486,6 +517,24 @@ export default function BurlingOnboarding() {
         <div style={{ padding: "12px 20px", display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea value={draft} onChange={e => setCommentDraft(p => ({ ...p, [opp.id]: e.target.value }))} style={{ ...inp, minHeight: 38, resize: "vertical", flex: 1 }} placeholder="Add an internal comment…" />
           <button onClick={() => postComment(opp.id)} disabled={!draft.trim()} style={{ ...btnPri, padding: "9px 16px", opacity: draft.trim() ? 1 : 0.4 }}>{IC.Send(12)} Post</button>
+        </div>
+      </Card>
+    );
+  };
+
+  // A gated workflow task card (button shown only to the responsible role)
+  const TaskCard = ({ title, actor, desc, actionLabel, onAction, waiting }) => {
+    const isActor = actor === "compliance" ? (isCompliance || isAdmin) : isManager;
+    return (
+      <Card s={{ borderColor: "#B8D4A8" }}>
+        <CH icon={IC.Check()} title={title} accent="#E8F5E9" right={<RolePill role={actor} />} />
+        <div style={{ padding: "18px 20px" }}>
+          <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>{desc}</p>
+          {isActor ? (
+            <button onClick={onAction} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{actionLabel}</button>
+          ) : (
+            <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>{waiting}</p>
+          )}
         </div>
       </Card>
     );
@@ -580,7 +629,18 @@ export default function BurlingOnboarding() {
             {/* On Hold */}
             <Card s={{ borderColor: T.hold + "40" }}>
               <CH icon={IC.Pause()} title="On Hold Onboardings" accent={T.holdBg} right={<span style={{ fontSize: 10, color: T.hold, fontWeight: 600 }}>{onHold.length}</span>} />
-              {onHold.length === 0 ? <EmptyReport msg="No onboardings on hold" /> : onHold.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+              {onHold.length === 0 ? <EmptyReport msg="No onboardings on hold" /> : onHold.map(o => (
+                <div key={o.id} className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+                  <div onClick={() => openOpp(o.id)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{o.client}</div>
+                    <div style={{ fontSize: 10, color: T.textMuted }}>{o.entity || o.appType || "—"} · {o.createdAt}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    {o.resumeRequested ? <Badge status="resume_requested" /> : <Badge status="on_hold" />}
+                    {o.resumeRequested && <button onClick={() => resumeOpp(o.id)} style={{ ...btnPri, padding: "7px 14px", fontSize: 11 }}>{IC.Play(12)} Resume</button>}
+                  </div>
+                </div>
+              ))}
             </Card>
           </div>
         )}
@@ -661,15 +721,15 @@ export default function BurlingOnboarding() {
         )}
 
         {/* ======== DETAIL VIEW ======== */}
-        {showDetail && (role === "employee" || role === "client" || role === "admin") && (
+        {showDetail && (role === "employee" || role === "client" || role === "admin" || role === "compliance") && (
           <div>
-            {isManager && <button onClick={goHome} style={{ ...btnS, marginBottom: 14 }}>{IC.Home()} Back to Dashboard</button>}
+            {(isManager || isCompliance) && <button onClick={goHome} style={{ ...btnS, marginBottom: 14 }}>{IC.Home()} Back to Dashboard</button>}
             <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, color: T.white }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : "Employee View"}</div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : isCompliance ? "Compliance View" : "Employee View"}</div>
                   <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
-                  <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : phase === "documents" ? "Document collection in progress" : phase === "ready_to_advance" ? "All documents approved — ready to advance" : phase === "send_sig_card" ? "Deposit and send the signature card" : phase === "signature_card" ? "Awaiting signed signature card" : phase === "open_account" ? "Ready to open account" : phase === "complete" ? "Account opened — onboarding complete" : "Pending"}</p>
+                  <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : isClient && activeOpp.accountOpened ? "Account opened" : PHASE_LABEL[phase] || "In progress"}</p>
                 </div>
                 {isManager && activeOpp.sent && phase !== "complete" && (
                   <button onClick={() => toggleHold(activeOpp.id)} style={{ ...btnBase, padding: "6px 14px", fontSize: 10, background: activeOpp.onHold ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.1)", color: T.white, border: "1px solid rgba(255,255,255,0.2)" }}>
@@ -681,9 +741,13 @@ export default function BurlingOnboarding() {
 
             {activeOpp.onHold && (
               <Card s={{ borderColor: T.hold + "40" }}>
-                <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 10, background: T.holdBg }}>
-                  {IC.Pause(16)}
-                  <div><span style={{ fontSize: 12, fontWeight: 600, color: T.hold }}>This onboarding is on hold.</span><br /><span style={{ fontSize: 11, color: T.textSecondary }}>Click Resume above to reactivate.</span></div>
+                <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: T.holdBg }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {IC.Pause(16)}
+                    <div><span style={{ fontSize: 12, fontWeight: 600, color: T.hold }}>This onboarding is on hold.</span><br /><span style={{ fontSize: 11, color: T.textSecondary }}>{isClient ? (activeOpp.resumeRequested ? "Resume requested — your banker will reactivate it." : "Request a resume from your banker to continue.") : activeOpp.resumeRequested ? "The client has requested a resume." : "Use Resume above to reactivate."}</span></div>
+                  </div>
+                  {isClient && !activeOpp.resumeRequested && <button onClick={() => requestResume(activeOpp.id)} style={{ ...btnSky, padding: "7px 14px" }}>{IC.Play(12)} Request Resume</button>}
+                  {isManager && activeOpp.resumeRequested && <button onClick={() => resumeOpp(activeOpp.id)} style={{ ...btnPri, padding: "8px 14px" }}>{IC.Play(12)} Resume</button>}
                 </div>
               </Card>
             )}
@@ -720,16 +784,23 @@ export default function BurlingOnboarding() {
               </Card>
             )}
 
-            {isManager && <CommentThread opp={activeOpp} />}
+            {(isManager || isCompliance) && <CommentThread opp={activeOpp} />}
 
             {activeOpp.sent && (
               <>
                 <Card>
                   <div style={{ padding: "14px 20px", display: "flex", gap: 8 }}>
-                    {["Documents", "Signature Card", "Open Account"].map((label, i) => {
-                      const stageIdx = (phase === "documents" || phase === "ready_to_advance") ? 0 : (phase === "send_sig_card" || phase === "signature_card") ? 1 : 2;
-                      return (<div key={label} style={{ flex: 1, textAlign: "center" }}><div style={{ height: 4, borderRadius: 2, background: i <= stageIdx ? T.sky : T.surfaceAlt, marginBottom: 6 }} /><span style={{ fontSize: 10, fontWeight: 600, color: i <= stageIdx ? T.navy : T.textMuted }}>{label}</span></div>);
-                    })}
+                    {(() => {
+                      const g0 = ["documents", "ach_memo", "management_approval"];
+                      const g1 = ["send_sig_card", "signature_card"];
+                      const g2 = ["create_bolb", "open_account"];
+                      let idx = g0.includes(phase) ? 0 : g1.includes(phase) ? 1 : g2.includes(phase) ? 2 : 3;
+                      const steps = isClient ? ["Documents", "Signature Card", "Account Opened"] : ["Documents", "Signature Card", "Account", "Closeout"];
+                      if (isClient) idx = activeOpp.accountOpened ? 2 : Math.min(idx, 2);
+                      return steps.map((label, i) => (
+                        <div key={label} style={{ flex: 1, textAlign: "center" }}><div style={{ height: 4, borderRadius: 2, background: i <= idx ? T.sky : T.surfaceAlt, marginBottom: 6 }} /><span style={{ fontSize: 10, fontWeight: 600, color: i <= idx ? T.navy : T.textMuted }}>{label}</span></div>
+                      ));
+                    })()}
                   </div>
                 </Card>
                 {activeOpp.clientDocs.length > 0 && (
@@ -784,31 +855,26 @@ export default function BurlingOnboarding() {
                   </Card>
                 )}
 
-                {phase === "ready_to_advance" && (
-                  <Card s={{ borderColor: "#B8D4A8" }}>
-                    <CH icon={IC.Check()} title="All Documents Approved" accent="#E8F5E9" />
-                    <div style={{ padding: "18px 20px" }}>
-                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>All documents for <strong>{activeOpp.client}</strong> have been approved by your team. Advance to the signature card stage when ready.</p>
-                      {isManager ? (
-                        <button onClick={() => advanceToSigCard(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Arrow(16)} Advance to Signature Card</button>
-                      ) : (
-                        <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>All your documents have been approved. Your banker will continue the process.</p>
-                      )}
-                    </div>
-                  </Card>
+                {phase === "ach_memo" && !isClient && (
+                  <TaskCard title="Create ACH Memo" actor="employee"
+                    desc={<>Initial documents for <strong>{activeOpp.client}</strong> have been collected and approved. Create the ACH memo to continue.</>}
+                    actionLabel={<>{IC.File(16)} Mark ACH Memo Created</>}
+                    onAction={() => completeTask(activeOpp.id, "achMemoCreated", "ACH memo created")}
+                    waiting="Your banker is preparing internal paperwork." />
+                )}
+                {phase === "management_approval" && !isClient && (
+                  <TaskCard title="Management Approval" actor="employee"
+                    desc={<>Confirm management has approved <strong>{activeOpp.client}</strong> before the signature card is sent.</>}
+                    actionLabel={<>{IC.Check(16)} Confirm Management Approval</>}
+                    onAction={() => completeTask(activeOpp.id, "mgmtApproved", "Management approval recorded")}
+                    waiting="Awaiting internal management approval." />
                 )}
                 {phase === "send_sig_card" && (
-                  <Card s={{ borderColor: "#B8D4A8" }}>
-                    <CH icon={IC.Check()} title="Deposit &amp; Send Signature Card" accent="#E8F5E9" />
-                    <div style={{ padding: "18px 20px" }}>
-                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>Deposit the signature card and send it to <strong>{activeOpp.client}</strong> to sign and return.</p>
-                      {isManager ? (
-                        <button onClick={() => sendSigCard(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Send(16)} Deposit and Send Signature Card to {activeOpp.client}</button>
-                      ) : (
-                        <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>Waiting for your banker to send the signature card.</p>
-                      )}
-                    </div>
-                  </Card>
+                  <TaskCard title="Deposit &amp; Send Signature Card" actor="employee"
+                    desc={<>Deposit the signature card and send it to <strong>{activeOpp.client}</strong> to sign and return.</>}
+                    actionLabel={<>{IC.Send(16)} Deposit and Send Signature Card to {activeOpp.client}</>}
+                    onAction={() => sendSigCard(activeOpp.id)}
+                    waiting="Waiting for your banker to send the signature card." />
                 )}
 
                 {activeOpp.sigCardSent && activeOpp.sigCardDocs.length > 0 && (
@@ -819,26 +885,88 @@ export default function BurlingOnboarding() {
                   </Card>
                 )}
 
-                {phase === "open_account" && (
-                  <Card s={{ borderColor: "#B8D4A8" }}>
-                    <CH icon={IC.Check()} title="Open Account" accent="#E8F5E9" />
-                    <div style={{ padding: "18px 20px" }}>
-                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>The signed signature card has been approved. Open the account for <strong>{activeOpp.client}</strong>; a welcome email with account, online banking, and related details will be sent to the client.</p>
-                      {isManager ? (
-                        <button onClick={() => openAccount(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Check(16)} Open Account &amp; Notify Client</button>
-                      ) : (
-                        <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>Your banker is opening your account. You'll receive a welcome email shortly.</p>
-                      )}
-                    </div>
-                  </Card>
+                {phase === "create_bolb" && !isClient && (
+                  <TaskCard title="Create BOLB" actor="employee"
+                    desc={<>The signed signature card is approved. Create BOLB for <strong>{activeOpp.client}</strong> before opening the account.</>}
+                    actionLabel={<>{IC.File(16)} Mark BOLB Created</>}
+                    onAction={() => completeTask(activeOpp.id, "bolbCreated", "BOLB created")}
+                    waiting="Your banker is finalizing your setup." />
                 )}
 
-                {phase === "complete" && (
+                {phase === "open_account" && (
+                  <TaskCard title="Open Account" actor="employee"
+                    desc={<>BOLB is created and all approvals are in place. Open the account for <strong>{activeOpp.client}</strong>; a welcome email with account, online banking, and related details will be sent to the client.</>}
+                    actionLabel={<>{IC.Check(16)} Open Account &amp; Notify Client</>}
+                    onAction={() => openAccount(activeOpp.id)}
+                    waiting="Your banker is opening your account. You'll receive a welcome email shortly." />
+                )}
+
+                {activeOpp.accountOpened && isClient && (
                   <div style={{ background: `linear-gradient(135deg, ${T.success} 0%, #145A34 100%)`, borderRadius: 12, padding: 28, textAlign: "center", color: T.white, marginBottom: 16 }}>
                     <div style={{ fontSize: 32, marginBottom: 6 }}>✓</div>
                     <h2 style={{ fontSize: 17, fontFamily: "'Playfair Display', serif", fontWeight: 700, marginBottom: 4 }}>Account Opened</h2>
-                    <p style={{ fontSize: 12, opacity: 0.85 }}>All documents approved, signature card signed, and the account is open. A welcome email with account and online banking details has been sent to {activeOpp.client}.</p>
+                    <p style={{ fontSize: 12, opacity: 0.85 }}>Your account is open. A welcome email with your account and online banking details has been sent to you.</p>
                   </div>
+                )}
+
+                {activeOpp.accountOpened && !isClient && (
+                  <>
+                    <Card>
+                      <div style={{ padding: "12px 20px", background: T.successBg }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: T.success }}>✓ Account opened — welcome email sent to {activeOpp.client}.</span>
+                        <div style={{ fontSize: 11, color: T.textSecondary, marginTop: 2 }}>Internal closeout below is not visible to the client.</div>
+                      </div>
+                    </Card>
+                    {phase === "risk_matrix" && (
+                      <TaskCard title="Risk Rating Matrix" actor="employee"
+                        desc={<>Complete the risk rating matrix for <strong>{activeOpp.client}</strong>. Compliance will review it next.</>}
+                        actionLabel={<>{IC.Check(16)} Submit Risk Rating Matrix</>}
+                        onAction={() => completeTask(activeOpp.id, "riskMatrixDone", "Risk rating matrix submitted")}
+                        waiting="Waiting for the banker to complete the risk rating matrix." />
+                    )}
+                    {phase === "risk_review" && (
+                      <TaskCard title="Review Risk Rating Matrix" actor="compliance"
+                        desc={<>Review the risk rating matrix submitted for <strong>{activeOpp.client}</strong>.</>}
+                        actionLabel={<>{IC.Check(16)} Approve Risk Rating</>}
+                        onAction={() => completeTask(activeOpp.id, "riskMatrixReviewed", "Risk rating reviewed by compliance")}
+                        waiting="Awaiting compliance review of the risk rating matrix." />
+                    )}
+                    {phase === "create_cip" && (
+                      <TaskCard title="Create and Save CIP" actor="employee"
+                        desc={<>Create and save the CIP for <strong>{activeOpp.client}</strong>. Compliance will review it next.</>}
+                        actionLabel={<>{IC.File(16)} Mark CIP Created</>}
+                        onAction={() => completeTask(activeOpp.id, "cipCreated", "CIP created and saved")}
+                        waiting="Waiting for the banker to create and save the CIP." />
+                    )}
+                    {phase === "review_cip" && (
+                      <TaskCard title="Review CIP" actor="compliance"
+                        desc={<>Review the CIP saved for <strong>{activeOpp.client}</strong>.</>}
+                        actionLabel={<>{IC.Check(16)} Approve CIP</>}
+                        onAction={() => completeTask(activeOpp.id, "cipReviewed", "CIP reviewed by compliance")}
+                        waiting="Awaiting compliance review of the CIP." />
+                    )}
+                    {phase === "assign_household" && (
+                      <TaskCard title="Assign Household Code" actor="compliance"
+                        desc={<>This is a high-compliance account. Assign the household code for <strong>{activeOpp.client}</strong> before closing.</>}
+                        actionLabel={<>{IC.Check(16)} Assign Household Code</>}
+                        onAction={() => completeTask(activeOpp.id, "householdCodeAssigned", "Household code assigned")}
+                        waiting="Awaiting compliance to assign the household code." />
+                    )}
+                    {phase === "collect_fee" && (
+                      <TaskCard title="Collect Onboarding Fee" actor="compliance"
+                        desc={<>Collect the onboarding fee for high-compliance account <strong>{activeOpp.client}</strong> before closing.</>}
+                        actionLabel={<>{IC.Check(16)} Mark Onboarding Fee Collected</>}
+                        onAction={() => completeTask(activeOpp.id, "onboardingFeeCollected", "Onboarding fee collected")}
+                        waiting="Awaiting compliance to collect the onboarding fee." />
+                    )}
+                    {phase === "complete" && (
+                      <div style={{ background: `linear-gradient(135deg, ${T.success} 0%, #145A34 100%)`, borderRadius: 12, padding: 28, textAlign: "center", color: T.white, marginBottom: 16 }}>
+                        <div style={{ fontSize: 32, marginBottom: 6 }}>✓</div>
+                        <h2 style={{ fontSize: 17, fontFamily: "'Playfair Display', serif", fontWeight: 700, marginBottom: 4 }}>Onboarding Closed</h2>
+                        <p style={{ fontSize: 12, opacity: 0.85 }}>All internal closeout steps for {activeOpp.client} are complete{activeOpp.highCompliance === "Yes" ? ", including household code and onboarding fee" : ""}.</p>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -870,6 +998,10 @@ export default function BurlingOnboarding() {
               <h1 style={{ fontSize: 18, fontFamily: "'Playfair Display', serif" }}>High Compliance Review</h1>
               <p style={{ fontSize: 11, opacity: 0.7 }}>Review flagged onboardings. Upload Welcome Packets and additional document requests.</p>
             </div>
+            <Card>
+              <CH icon={IC.File()} title="Currently Onboarding" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{currentlyOnboarding.length}</span>} />
+              {currentlyOnboarding.length === 0 ? <EmptyReport msg="No active onboardings" /> : currentlyOnboarding.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+            </Card>
             {wpPendingReview.length > 0 && (
               <Card s={{ borderColor: T.compBorder }}>
                 <CH icon={IC.Lock()} title="Welcome Packets — Pending Review" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText, fontWeight: 600 }}>{wpPendingReview.length}</span>} />
