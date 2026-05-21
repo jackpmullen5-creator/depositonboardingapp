@@ -474,17 +474,16 @@ export default function BurlingOnboarding() {
       {/* HEADER */}
       <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, padding: "0 24px", borderBottom: `2px solid ${T.sky}` }}>
         <div style={{ maxWidth: 1040, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 66, gap: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", minWidth: 0 }} onClick={goHome}>
-            <svg width="34" height="34" viewBox="0 0 48 48" fill="none" stroke={T.white} strokeWidth="2.2" style={{ flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13, cursor: "pointer", minWidth: 0 }} onClick={goHome}>
+            <svg width="36" height="36" viewBox="0 0 48 48" fill="none" stroke={T.white} strokeWidth="2.1" style={{ flexShrink: 0 }}>
               <circle cx="24" cy="24" r="20" />
-              <ellipse cx="18.5" cy="24" rx="8.5" ry="20" />
-              <ellipse cx="29.5" cy="24" rx="8.5" ry="20" />
+              <ellipse cx="18" cy="24" rx="9" ry="20" />
+              <ellipse cx="30" cy="24" rx="9" ry="20" />
             </svg>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 9, color: T.skyLight, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 600 }}>Burling Bank</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: T.white, fontFamily: "'Playfair Display', serif", lineHeight: 1.1, whiteSpace: "nowrap" }}>Deposit Onboarding Module</div>
-            </div>
-            <div style={{ width: 1, height: 30, background: "rgba(255,255,255,0.15)", flexShrink: 0 }} />
+            <span style={{ fontSize: 21, fontWeight: 700, color: T.white, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Burling Bank</span>
+            <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap" }}>Deposit Onboarding Module</span>
+            <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
               <RolePill role={role} />
               <span style={{ fontSize: 13, fontWeight: 600, color: T.white, whiteSpace: "nowrap" }}>Jack Mullen</span>
