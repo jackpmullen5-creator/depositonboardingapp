@@ -205,6 +205,62 @@ const getOppStage = (opp) => {
   return computePhase(opp);
 };
 
+// Ordered milestone phases for a given opp (conditional steps included)
+const phaseOrder = (opp) => {
+  const arr = ["documents", "pre_sig_card", "signature_card"];
+  if (opp.onlineBanking === "Business") arr.push("create_bolb");
+  arr.push("open_account", "risk_matrix", "create_cip", "review_cip");
+  if (opp.highCompliance === "Yes") arr.push("assign_household", "collect_fee");
+  arr.push("complete");
+  return arr;
+};
+
+// A plain-language description of where the opp sits + who is responsible next
+const workflowStatus = (opp) => {
+  if (opp.cancelled) return { text: "Onboarding cancelled", who: null };
+  if (opp.onHold) return { text: opp.resumeRequested ? "On hold — client requested resume" : "On hold", who: opp.resumeRequested ? "employee" : null };
+  if (!opp.sent && opp.compStatus === "pending_compliance") return { text: "Pending Compliance EDD review", who: "compliance" };
+  if (!opp.sent && (opp.compStatus === "compliance_ready" || opp.compStatus === "no_packet")) return { text: "Compliance cleared — ready to send to client", who: "employee" };
+  if (!opp.sent) return { text: "Being configured", who: "employee" };
+  const ph = computePhase(opp);
+  switch (ph) {
+    case "documents": {
+      const docs = initialDocsOf(opp);
+      return (bucketsFull(docs) && docs.some(d => d.status === "uploaded"))
+        ? { text: "Reviewing the client's submitted documents", who: "employee" }
+        : { text: "Collecting documents from the client", who: "client" };
+    }
+    case "pre_sig_card": return { text: "Preparing & sending the signature card", who: "employee" };
+    case "signature_card":
+      return (opp.sigCardDocs || []).some(d => d.status === "uploaded")
+        ? { text: "Reviewing the signed signature card", who: "employee" }
+        : { text: "Awaiting the client's signed signature card", who: "client" };
+    case "create_bolb": return { text: "Setting up Business Online Banking (BOLB)", who: "employee" };
+    case "open_account": return { text: "Ready to open the account", who: "employee" };
+    case "risk_matrix":
+      return (opp.riskMatrixDocs || []).some(d => d.status === "uploaded")
+        ? { text: "Compliance reviewing the risk rating matrix", who: "compliance" }
+        : { text: "Client Services to upload the risk rating matrix", who: "employee" };
+    case "create_cip": return { text: "Client Services to create & save the CIP", who: "employee" };
+    case "review_cip": return { text: "Compliance to review the CIP", who: "compliance" };
+    case "assign_household": return { text: "Compliance to assign the household code", who: "compliance" };
+    case "collect_fee": return { text: "Compliance to collect the onboarding fee", who: "compliance" };
+    case "complete": return { text: "Onboarding closed", who: null };
+    default: return { text: "In progress", who: null };
+  }
+};
+
+// "Step X of Y · description" when in an active sent phase, else just the description
+const stepText = (opp) => {
+  const ws = workflowStatus(opp);
+  const order = phaseOrder(opp);
+  const ph = computePhase(opp);
+  if (opp.sent && !opp.cancelled && !opp.onHold && order.includes(ph) && ph !== "complete") {
+    return `Step ${order.indexOf(ph) + 1} of ${order.length} · ${ws.text}`;
+  }
+  return ws.text;
+};
+
 // Bank-provided forms the client must download, sign, and upload (reviewed by employee)
 const buildBankDocs = (cfg) => {
   const b = [];
@@ -600,7 +656,8 @@ export default function BurlingOnboarding() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{opp.client}</div>
-            <div style={{ fontSize: 10, color: T.textMuted }}>{opp.entity || opp.appType || "—"} · {opp.createdAt}</div>
+            <div style={{ fontSize: 11, color: T.navy, fontWeight: 500, marginTop: 1 }}>{stepText(opp)}</div>
+            <div style={{ fontSize: 10, color: T.textMuted, marginTop: 1 }}>{opp.entity || opp.appType || "—"} · {opp.createdAt}</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -948,7 +1005,7 @@ export default function BurlingOnboarding() {
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : isCompliance ? "Compliance View" : "Client Services View"}</div>
                   <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
-                  <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : isClient && activeOpp.accountOpened ? "Account opened" : PHASE_LABEL[phase] || "In progress"}</p>
+                  <p style={{ fontSize: 11, opacity: 0.7 }}>{isClient && activeOpp.accountOpened ? "Account opened" : workflowStatus(activeOpp).text}</p>
                 </div>
                 {isManager && phase !== "complete" && !activeOpp.cancelled && (
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -962,6 +1019,17 @@ export default function BurlingOnboarding() {
                 )}
               </div>
             </div>
+
+            {!activeOpp.cancelled && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, background: T.skyPale, border: `1px solid ${T.skyLight}`, borderRadius: 10, padding: "10px 16px", marginBottom: 14 }}>
+                <span style={{ color: T.sky, flexShrink: 0 }}>{IC.Arrow(16)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.textMuted }}>Current Step</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.navy }}>{isClient && activeOpp.accountOpened ? "Account opened — nothing further needed from you" : (isClient ? workflowStatus(activeOpp).text : stepText(activeOpp))}</div>
+                </div>
+                {(() => { const w = workflowStatus(activeOpp).who; return w ? <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}><span style={{ fontSize: 9, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>With</span><RolePill role={w} /></span> : null; })()}
+              </div>
+            )}
 
             {activeOpp.onHold && (
               <Card s={{ borderColor: T.hold + "40" }}>
