@@ -202,9 +202,9 @@ export default function BurlingOnboarding() {
     const cDocs = compDocRequests.map((d, i) => ({ id: `comp-${i}`, name: d, category: "Compliance Request", status: "action_needed", file: null }));
 
     let bDocs = [];
-    if (nf.needApp === "Yes") bDocs.push({ id: "app-1", name: nf.appType === "Personal" ? "Personal Account Application" : "Business Account Application", signed: false });
+    if (nf.needApp === "Yes") bDocs.push({ id: "app-1", name: nf.appType === "Personal" ? "Personal Account Application" : "Business Account Application", signed: false, fileUrl: "/docs/account-application.pdf" });
     bDocs.push({ id: "sig-1", name: "Signature Card", signed: false });
-    if (nf.onlineBanking === "Business") { bDocs.push({ id: "cma-1", name: "Cash Management Agreement", signed: false }); bDocs.push({ id: "pp-1", name: "Positive Pay Form", signed: false }); }
+    if (nf.onlineBanking === "Business") { bDocs.push({ id: "cma-1", name: "Cash Management Agreement", signed: false, fileUrl: "/docs/cash-management-agreement.pdf" }); bDocs.push({ id: "pp-1", name: "Positive Pay Form", signed: false, fileUrl: "/docs/positive-pay-form.pdf" }); }
     if (compWelcomePacket) bDocs.push({ id: "wp-1", name: "Compliance Welcome Packet", signed: false });
 
     const newOpp = {
@@ -286,9 +286,9 @@ export default function BurlingOnboarding() {
     }
     const cDocs = (opp.compDocRequests || []).map((d, i) => ({ id: `comp-${i}`, name: d, category: "Compliance Request", status: "action_needed", file: null }));
     let bDocs = [];
-    if (opp.needApp === "Yes") bDocs.push({ id: "app-1", name: opp.appType === "Personal" ? "Personal Account Application" : "Business Account Application", signed: false });
+    if (opp.needApp === "Yes") bDocs.push({ id: "app-1", name: opp.appType === "Personal" ? "Personal Account Application" : "Business Account Application", signed: false, fileUrl: "/docs/account-application.pdf" });
     bDocs.push({ id: "sig-1", name: "Signature Card", signed: false });
-    if (opp.onlineBanking === "Business") { bDocs.push({ id: "cma-1", name: "Cash Management Agreement", signed: false }); bDocs.push({ id: "pp-1", name: "Positive Pay Form", signed: false }); }
+    if (opp.onlineBanking === "Business") { bDocs.push({ id: "cma-1", name: "Cash Management Agreement", signed: false, fileUrl: "/docs/cash-management-agreement.pdf" }); bDocs.push({ id: "pp-1", name: "Positive Pay Form", signed: false, fileUrl: "/docs/positive-pay-form.pdf" }); }
     if (opp.compWelcomePacket) bDocs.push({ id: "wp-1", name: "Compliance Welcome Packet", signed: false });
     updateOpp(id, o => ({
       ...o,
@@ -617,15 +617,16 @@ export default function BurlingOnboarding() {
                     ))}
                   </Card>
                 )}
-                {allDocsApproved && activeOpp.bankDocs.length > 0 && (
+                {activeOpp.bankDocs.length > 0 && (
                   <Card>
-                    <CH icon={IC.Pen()} title="Documents for Signing" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.signed).length}/{activeOpp.bankDocs.length} signed</span>} />
+                    <CH icon={IC.Pen()} title="Documents to Review &amp; Sign" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.signed).length}/{activeOpp.bankDocs.length} signed</span>} />
                     {activeOpp.bankDocs.map(doc => (
                       <div key={doc.id}>
                         <div className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ color: T.textMuted }}>{IC.File()}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{doc.name}</span></div>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <Badge status={doc.signed ? "signed" : "pending_signature"} />
+                            {doc.fileUrl && <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none", padding: "5px 13px", fontSize: 11 }}>{IC.File(12)} View</a>}
                             {isClient && !doc.signed && <button onClick={() => setSigDoc(sigDoc === doc.id ? null : doc.id)} style={{ ...btnSky, padding: "5px 13px", fontSize: 11 }}>{IC.Pen(12)} Sign</button>}
                           </div>
                         </div>
