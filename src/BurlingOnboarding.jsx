@@ -177,7 +177,7 @@ const PHASE_LABEL = {
 
 // Whether the pre-signature-card checklist is satisfied (ACH memo only matters for Business banking)
 const achSatisfied = (opp) => opp.onlineBanking !== "Business" || opp.achMemoCreated || opp.achMemoNotNeeded;
-const preSigReady = (opp) => achSatisfied(opp) && opp.mgmtApproved;
+const preSigReady = (opp) => achSatisfied(opp) && opp.mgmtApproved && bucketsFull(opp.sigCardPrepDocs || []);
 
 // Post-send phase progression (ignores hold). Returns the current step key.
 const computePhase = (opp) => {
@@ -217,6 +217,7 @@ const buildBankDocs = (cfg) => {
 };
 const welcomePacketDoc = () => ({ id: "wp-1", name: "Compliance Welcome Packet", category: "Compliance", status: "action_needed", file: null, template: "/docs/welcome-packet.pdf", reviewer: "compliance" });
 const sigCardDoc = () => ({ id: "sig-1", name: "Signature Card", category: "Account Forms", status: "action_needed", file: null, template: "/docs/signature-card.pdf" });
+const sigCardPrepDoc = () => ({ id: "sigprep-1", name: "Signature Card", category: "Client Services", status: "action_needed", files: [], template: "/docs/signature-card.pdf" });
 
 
 export default function BurlingOnboarding() {
@@ -244,6 +245,7 @@ export default function BurlingOnboarding() {
   const [docLib, setDocLib] = useState(PROCESS_DOCS);
   const [docForm, setDocForm] = useState({ name: "", category: "Account Forms" });
   const [commentDraft, setCommentDraft] = useState({});
+  const [editKey, setEditKey] = useState(null);
 
   const [toast, setToast] = useState({ msg: "", visible: false });
   const toastTimer = useRef(null);
@@ -319,6 +321,7 @@ export default function BurlingOnboarding() {
       comments: [],
       audit: [],
       riskMatrixDocs: [],
+      sigCardPrepDocs: [sigCardPrepDoc()],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -365,6 +368,7 @@ export default function BurlingOnboarding() {
       comments: [],
       audit: [],
       riskMatrixDocs: [],
+      sigCardPrepDocs: [sigCardPrepDoc()],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -403,6 +407,7 @@ export default function BurlingOnboarding() {
       compClientDocs: cDocs,
       bankDocs: bDocs,
       welcomePacketDocs: wpDocs,
+      sigCardPrepDocs: opp.sigCardPrepDocs && opp.sigCardPrepDocs.length ? opp.sigCardPrepDocs : [sigCardPrepDoc()],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -428,15 +433,21 @@ export default function BurlingOnboarding() {
     });
     logAudit(activeOppId, `Uploaded ${files.length} file${files.length > 1 ? "s" : ""} to "${docName(field, id)}"`);
   };
-  const viewFile = (f) => {
+  const openUrl = (url) => {
     try {
-      if (f.url && f.url.startsWith("data:")) {
-        fetch(f.url).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), "_blank"));
-      } else if (f.url) {
-        window.open(f.url, "_blank");
+      if (url && url.startsWith("data:")) {
+        fetch(url).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), "_blank"));
+      } else if (url) {
+        window.open(url, "_blank");
       }
     } catch { /* ignore */ }
   };
+  const viewFile = (f) => openUrl(f.url);
+  const removeFile = (field, id, fileId) => updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => {
+    if (d.id !== id) return d;
+    const files = (d.files || []).filter(f => f.id !== fileId);
+    return { ...d, files, status: files.length ? d.status : "action_needed" };
+  }) }));
   const approveDoc = (field, id) => { updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "approved" } : d) })); logAudit(activeOppId, `Approved "${docName(field, id)}"`); };
   const rejectDoc = (field, id) => { updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "rejected", files: [] } : d) })); logAudit(activeOppId, `Rejected "${docName(field, id)}"`); };
   // Status update on an arbitrary opp (used by the compliance portal review surface)
@@ -506,9 +517,14 @@ export default function BurlingOnboarding() {
   };
   const realClient = session?.role === "client";
   const sendSigCard = (id) => {
-    updateOpp(id, o => ({ ...o, sigCardSent: true, sigCardDocs: [sigCardDoc()], emails: [...o.emails, { type: "sent", subject: `Signature card sent to ${o.client}`, date: new Date().toLocaleDateString() }] }));
-    logAudit(id, "Populated and sent signature card");
-    show("Signature card sent to client");
+    updateOpp(id, o => {
+      const prep = (o.sigCardPrepDocs?.[0]?.files || [])[0];
+      const card = sigCardDoc();
+      if (prep) card.template = prep.url;
+      return { ...o, sigCardSent: true, sigCardDocs: [card], emails: [...o.emails, { type: "sent", subject: `Signature card sent to ${o.client}`, date: new Date().toLocaleDateString() }] };
+    });
+    logAudit(id, "Sent signature card to client");
+    show("Signature card emailed to client");
   };
   const openAccount = (id) => {
     updateOpp(id, o => ({ ...o, accountOpened: true, riskMatrixDocs: (o.riskMatrixDocs && o.riskMatrixDocs.length) ? o.riskMatrixDocs : [{ id: "risk-1", name: "Risk Rating Matrix", category: "Internal — Compliance Review", status: "action_needed", files: [] }], emails: [...o.emails, { type: "sent", subject: `Account opened — welcome email sent to ${o.client}`, date: new Date().toLocaleDateString() }] }));
@@ -652,12 +668,14 @@ export default function BurlingOnboarding() {
   // A document bucket with drag-and-drop upload + clickable files.
   // Called as a function (not <BucketRow/>) so its inputs don't remount on every keystroke/render.
   const bucketRow = (doc, field, { reviewer = "employee", uploader = "client" } = {}) => {
-    const canReview = reviewer === "compliance" ? (isCompliance || isAdmin) : isManager;
+    const canReview = reviewer === "none" ? false : reviewer === "compliance" ? (isCompliance || isAdmin) : isManager;
     const canUpload = uploader === "employee" ? isManager : isClient;
     const files = doc.files || [];
     const needsUpload = doc.status === "action_needed" || doc.status === "rejected";
     const badgeStatus = needsUpload ? (canUpload ? doc.status : "awaiting_upload") : doc.status;
     const inputId = `up-${field}-${doc.id}`;
+    const editing = editKey === `${field}:${doc.id}`;
+    const showDrop = canUpload && (needsUpload || editing);
     return (
       <div key={doc.id} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
         <div className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px" }}>
@@ -667,16 +685,23 @@ export default function BurlingOnboarding() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <Badge status={badgeStatus} />
-            {canUpload && doc.template && needsUpload && <a href={doc.template} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} Download &amp; Sign</a>}
+            {canUpload && doc.template && needsUpload && <button onClick={() => openUrl(doc.template)} style={btnS}>{IC.File(12)} Download &amp; Sign</button>}
+            {canUpload && doc.status === "uploaded" && !editing && <button onClick={() => setEditKey(`${field}:${doc.id}`)} style={btnS}>{IC.Pen(12)} Edit</button>}
+            {canUpload && editing && <button onClick={() => setEditKey(null)} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Done</button>}
             {canReview && doc.status === "uploaded" && (<><button onClick={() => approveDoc(field, doc.id)} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => rejectDoc(field, doc.id)} style={btnDanger}>{IC.X(12)} Reject</button></>)}
           </div>
         </div>
         {files.length > 0 && (
           <div style={{ padding: "0 20px 8px 44px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {files.map(f => <button key={f.id} onClick={() => viewFile(f)} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: T.sky, cursor: "pointer", background: T.skyPale, border: `1px solid ${T.skyLight}`, borderRadius: 6, padding: "3px 8px" }}>{IC.File(11)} {f.name}</button>)}
+            {files.map(f => (
+              <span key={f.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: T.sky, background: T.skyPale, border: `1px solid ${T.skyLight}`, borderRadius: 6, padding: "3px 8px" }}>
+                <button onClick={() => viewFile(f)} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", color: T.sky, cursor: "pointer", padding: 0, fontSize: 11 }}>{IC.File(11)} {f.name}</button>
+                {editing && canUpload && <button onClick={() => removeFile(field, doc.id, f.id)} style={{ background: "none", border: "none", color: T.danger, cursor: "pointer", padding: 0, display: "inline-flex" }}>{IC.X(11)}</button>}
+              </span>
+            ))}
           </div>
         )}
-        {canUpload && doc.status !== "approved" && (
+        {showDrop && (
           <div style={{ padding: "0 20px 12px 44px" }}>
             <input id={inputId} type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(field, doc.id, e.target.files); e.target.value = ""; }} />
             <div
@@ -685,7 +710,7 @@ export default function BurlingOnboarding() {
               onDragLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.surfaceAlt; }}
               onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.surfaceAlt; addFiles(field, doc.id, e.dataTransfer.files); }}
               style={{ border: `1.5px dashed ${T.border}`, background: T.surfaceAlt, borderRadius: 8, padding: "10px 12px", textAlign: "center", cursor: "pointer", fontSize: 11, color: T.textSecondary }}>
-              {IC.Upload(13)} Drag &amp; drop files here, or click to browse{files.length > 0 ? " (add more)" : ""}
+              {IC.Upload(13)} {editing ? "Drag & drop to add or replace files, or click to browse" : "Drag & drop files here, or click to browse"}
             </div>
           </div>
         )}
@@ -1022,46 +1047,6 @@ export default function BurlingOnboarding() {
                     })()}
                   </div>
                 </Card>
-                {(activeOpp.clientDocs.length > 0 || activeOpp.bankDocs.length > 0) && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 2px 8px" }}>
-                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.sky }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.navy }}>Client Services</span>
-                  </div>
-                )}
-                {activeOpp.clientDocs.length > 0 && (
-                  <Card>
-                    <CH icon={IC.File()} title="Account Requests" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.clientDocs.filter(d => d.status === "approved").length}/{activeOpp.clientDocs.length} approved</span>} />
-                    {activeOpp.clientDocs.map(doc => bucketRow(doc, "clientDocs"))}
-                  </Card>
-                )}
-                {activeOpp.bankDocs.length > 0 && (
-                  <Card>
-                    <CH icon={IC.Pen()} title="Forms to Download, Sign &amp; Return" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.status === "approved").length}/{activeOpp.bankDocs.length} approved</span>} />
-                    {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download each form, sign it, then upload the signed copy.</p></div>}
-                    {activeOpp.bankDocs.map(doc => bucketRow(doc, "bankDocs"))}
-                  </Card>
-                )}
-                {(activeOpp.compClientDocs.length > 0 || (activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0)) && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 2px 8px" }}>
-                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.compText }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.compText }}>Compliance</span>
-                  </div>
-                )}
-                {activeOpp.compClientDocs.length > 0 && (
-                  <Card s={{ borderColor: T.compBorder }}>
-                    <CH icon={IC.Lock()} title="Compliance Requests" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>{activeOpp.compClientDocs.filter(d => d.status === "approved").length}/{activeOpp.compClientDocs.length} approved</span>} />
-                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>These documents have been requested by our compliance team as part of enhanced due diligence.</p></div>}
-                    {activeOpp.compClientDocs.map(doc => bucketRow(doc, "compClientDocs"))}
-                  </Card>
-                )}
-                {activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0 && (
-                  <Card s={{ borderColor: T.compBorder }}>
-                    <CH icon={IC.Lock()} title="Compliance Welcome Packet" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>Reviewed by Compliance</span>} />
-                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>Download, sign, and upload the compliance welcome packet. It will be reviewed by our compliance team.</p></div>}
-                    {activeOpp.welcomePacketDocs.map(doc => bucketRow(doc, "welcomePacketDocs", { reviewer: "compliance" }))}
-                  </Card>
-                )}
-
                 {phase === "pre_sig_card" && !isClient && (() => {
                   const achNeeded = activeOpp.onlineBanking === "Business";
                   const achDone = activeOpp.achMemoCreated || activeOpp.achMemoNotNeeded;
@@ -1077,19 +1062,28 @@ export default function BurlingOnboarding() {
                   return (
                     <Card s={{ borderColor: "#B8D4A8" }}>
                       <CH icon={IC.Check()} title="Signature Card Readiness" accent="#E8F5E9" right={<RolePill role="employee" />} />
-                      <div style={{ padding: "6px 20px 18px" }}>
+                      <div style={{ padding: "6px 20px 0" }}>
                         {achNeeded && (
                           <Item done={achDone} label="ACH Memo" detail={activeOpp.achMemoNotNeeded ? "Marked not needed" : activeOpp.achMemoCreated ? "Created" : "Required for Business online banking"}>
-                            {!achDone && <>
+                            {isManager && !achDone && <>
                               <button onClick={() => completeTask(activeOpp.id, "achMemoCreated", "ACH memo created")} style={btnSky}>{IC.Check(12)} Mark Created</button>
                               <button onClick={() => completeTask(activeOpp.id, "achMemoNotNeeded", "ACH memo marked not needed")} style={btnS}>Not Needed</button>
                             </>}
                           </Item>
                         )}
                         <Item done={activeOpp.mgmtApproved} label="Management Approval" detail="Confirm management approved this account">
-                          {!activeOpp.mgmtApproved && <button onClick={() => completeTask(activeOpp.id, "mgmtApproved", "Management approval recorded")} style={btnSky}>{IC.Check(12)} Confirm</button>}
+                          {isManager && !activeOpp.mgmtApproved && <button onClick={() => completeTask(activeOpp.id, "mgmtApproved", "Management approval recorded")} style={btnSky}>{IC.Check(12)} Confirm</button>}
                         </Item>
-                        <button onClick={() => sendSigCard(activeOpp.id)} disabled={!preSigReady(activeOpp)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14, marginTop: 16, opacity: preSigReady(activeOpp) ? 1 : 0.4 }}>{IC.Send(16)} Populate and Send Signature Card</button>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.navy, paddingTop: 12 }}>Signature Card</div>
+                        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>Upload the signature card to send to the client.</div>
+                      </div>
+                      {(activeOpp.sigCardPrepDocs || []).map(doc => bucketRow(doc, "sigCardPrepDocs", { uploader: "employee", reviewer: "none" }))}
+                      <div style={{ padding: "14px 20px 18px" }}>
+                        {isManager ? (
+                          <button onClick={() => sendSigCard(activeOpp.id)} disabled={!preSigReady(activeOpp)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14, opacity: preSigReady(activeOpp) ? 1 : 0.4 }}>{IC.Send(16)} Send Signature Card to Client</button>
+                        ) : (
+                          <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>Client Services completes these tasks and sends the signature card.</p>
+                        )}
                       </div>
                     </Card>
                   );
@@ -1180,6 +1174,46 @@ export default function BurlingOnboarding() {
                       </div>
                     )}
                   </>
+                )}
+
+                {(activeOpp.clientDocs.length > 0 || activeOpp.bankDocs.length > 0) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 2px 8px" }}>
+                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.sky }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.navy }}>Client Services Documents</span>
+                  </div>
+                )}
+                {activeOpp.clientDocs.length > 0 && (
+                  <Card>
+                    <CH icon={IC.File()} title="Account Requests" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.clientDocs.filter(d => d.status === "approved").length}/{activeOpp.clientDocs.length} approved</span>} />
+                    {activeOpp.clientDocs.map(doc => bucketRow(doc, "clientDocs"))}
+                  </Card>
+                )}
+                {activeOpp.bankDocs.length > 0 && (
+                  <Card>
+                    <CH icon={IC.Pen()} title="Forms to Download, Sign &amp; Return" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.status === "approved").length}/{activeOpp.bankDocs.length} approved</span>} />
+                    {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download each form, sign it, then upload the signed copy.</p></div>}
+                    {activeOpp.bankDocs.map(doc => bucketRow(doc, "bankDocs"))}
+                  </Card>
+                )}
+                {(activeOpp.compClientDocs.length > 0 || (activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0)) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 2px 8px" }}>
+                    <span style={{ width: 4, height: 14, borderRadius: 2, background: T.compText }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.compText }}>Compliance Documents</span>
+                  </div>
+                )}
+                {activeOpp.compClientDocs.length > 0 && (
+                  <Card s={{ borderColor: T.compBorder }}>
+                    <CH icon={IC.Lock()} title="Compliance Requests" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>{activeOpp.compClientDocs.filter(d => d.status === "approved").length}/{activeOpp.compClientDocs.length} approved</span>} />
+                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>These documents have been requested by our compliance team as part of enhanced due diligence.</p></div>}
+                    {activeOpp.compClientDocs.map(doc => bucketRow(doc, "compClientDocs"))}
+                  </Card>
+                )}
+                {activeOpp.welcomePacketDocs && activeOpp.welcomePacketDocs.length > 0 && (
+                  <Card s={{ borderColor: T.compBorder }}>
+                    <CH icon={IC.Lock()} title="Compliance Welcome Packet" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText }}>Reviewed by Compliance</span>} />
+                    {isClient && <div style={{ padding: "10px 20px", background: T.compBg, borderBottom: `1px solid ${T.compBorder}` }}><p style={{ fontSize: 11, color: T.compText }}>Download, sign, and upload the compliance welcome packet. It will be reviewed by our compliance team.</p></div>}
+                    {activeOpp.welcomePacketDocs.map(doc => bucketRow(doc, "welcomePacketDocs", { reviewer: "compliance" }))}
+                  </Card>
                 )}
               </>
             )}
