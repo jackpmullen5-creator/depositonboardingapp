@@ -214,7 +214,9 @@ export default function BurlingOnboarding() {
   const [compExplanation, setCompExplanation] = useState("");
 
   // Admin state
-  const [users, setUsers] = useState([{ id: "u-admin", name: "Jack Mullen", email: "jackpmullen5@gmail.com", role: "admin", createdAt: new Date().toLocaleDateString() }]);
+  const [users, setUsers] = useState([{ id: "u-admin", name: "Jack Mullen", email: "jackpmullen5@gmail.com", role: "admin", username: "admin", password: "admin", activated: true, createdAt: new Date().toLocaleDateString() }]);
+  const [session, setSession] = useState(null);
+  const [auth, setAuth] = useState({ mode: "signin", username: "", password: "", email: "", newUsername: "", newPassword: "" });
   const [uf, setUf] = useState({ name: "", email: "", role: "employee" });
   const [docLib, setDocLib] = useState(PROCESS_DOCS);
   const [docForm, setDocForm] = useState({ name: "", category: "Account Forms" });
@@ -292,14 +294,15 @@ export default function BurlingOnboarding() {
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
-      emails: [{ type: "sent", subject: `Onboarding initiated for ${nf.client}`, date: new Date().toLocaleDateString() }],
+      emails: [{ type: "sent", subject: `You've been invited to the onboarding portal for ${nf.client}`, date: new Date().toLocaleDateString() }],
       createdAt: new Date().toLocaleDateString(),
     };
 
     setOpps(prev => [...prev, newOpp]);
+    inviteClient(newOpp);
     setActiveOppId(newOpp.id);
     setScreen("detail");
-    show(`Onboarding sent to ${nf.client}`);
+    show(`Invite sent to ${nf.contactEmail || nf.client}`);
 
     // Reset wizard
     setNf({ client: "", needApp: "", appType: "", entity: "", onlineBanking: "", highCompliance: "", contactEmail: "", summary: "" });
@@ -373,9 +376,10 @@ export default function BurlingOnboarding() {
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
-      emails: [{ type: "sent", subject: `Onboarding initiated for ${opp.client}`, date: new Date().toLocaleDateString() }],
+      emails: [{ type: "sent", subject: `You've been invited to the onboarding portal for ${opp.client}`, date: new Date().toLocaleDateString() }],
     }));
-    show(`Onboarding email sent to ${opp.client}`);
+    inviteClient(opp);
+    show(`Invite sent to ${opp.contactEmail || opp.client}`);
   };
 
   // Doc actions on active opp
@@ -405,6 +409,38 @@ export default function BurlingOnboarding() {
     updateOpp(id, o => ({ ...o, onHold: false, resumeRequested: false }));
     show(`${opp.client} resumed`);
   };
+
+  // Auth
+  const loginAs = (u) => {
+    setSession(u);
+    setRole(u.role);
+    setAuth({ mode: "signin", username: "", password: "", email: "", newUsername: "", newPassword: "" });
+    if (u.role === "client") { setActiveOppId(u.oppId); setScreen("detail"); }
+    else { setScreen("home"); setActiveOppId(null); }
+  };
+  const signIn = () => {
+    const u = users.find(x => x.activated && x.username === auth.username.trim() && x.password === auth.password);
+    if (!u) { show("Invalid username or password"); return; }
+    loginAs(u);
+  };
+  const activate = () => {
+    const email = auth.email.trim().toLowerCase();
+    const u = users.find(x => (x.email || "").toLowerCase() === email && !x.activated);
+    if (!u) { show("No pending invite found for that email"); return; }
+    if (!auth.newUsername.trim() || !auth.newPassword.trim()) { show("Choose a username and password"); return; }
+    if (users.some(x => x.username && x.username === auth.newUsername.trim())) { show("That username is taken"); return; }
+    const updated = { ...u, username: auth.newUsername.trim(), password: auth.newPassword, activated: true };
+    setUsers(prev => prev.map(x => x.id === u.id ? updated : x));
+    loginAs(updated);
+  };
+  const logout = () => { setSession(null); setRole("employee"); setScreen("home"); setActiveOppId(null); };
+  const inviteClient = (opp) => {
+    if (!opp.contactEmail) return;
+    setUsers(prev => prev.some(u => u.oppId === opp.id)
+      ? prev.map(u => u.oppId === opp.id ? { ...u, company: opp.client, email: opp.contactEmail } : u)
+      : [...prev, { id: `u-cli-${opp.id}`, name: opp.contactEmail, email: opp.contactEmail, role: "client", company: opp.client, oppId: opp.id, activated: false, createdAt: new Date().toLocaleDateString() }]);
+  };
+  const realClient = session?.role === "client";
   const sendSigCard = (id) => {
     updateOpp(id, o => ({ ...o, sigCardSent: true, sigCardDocs: [sigCardDoc()], emails: [...o.emails, { type: "sent", subject: `Signature card sent to ${o.client}`, date: new Date().toLocaleDateString() }] }));
     show("Signature card sent to client");
@@ -459,7 +495,7 @@ export default function BurlingOnboarding() {
   const showCompliance = role === "compliance";
 
   const openOpp = (id) => { setActiveOppId(id); setScreen("detail"); };
-  const goHome = () => { setScreen("home"); setActiveOppId(null); };
+  const goHome = () => { if (realClient) { setActiveOppId(session.oppId); setScreen("detail"); } else { setScreen("home"); setActiveOppId(null); } };
 
   // Report table row
   const OppRow = ({ opp, onClick }) => {
@@ -572,6 +608,50 @@ export default function BurlingOnboarding() {
     );
   };
 
+  if (!session) {
+    const a = auth;
+    return (
+      <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <style>{FONTS}{`* { box-sizing: border-box; margin: 0; padding: 0; } input:focus { border-color: ${T.sky} !important; outline: none; }`}</style>
+        <div style={{ width: "100%", maxWidth: 400 }}>
+          <div style={{ textAlign: "center", marginBottom: 22 }}>
+            <img src="/burling-logo-white.png" alt="Burling Bank" style={{ height: 34, marginBottom: 12 }} />
+            <div style={{ fontSize: 12, color: T.skyLight, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 600 }}>Deposit Onboarding Module</div>
+          </div>
+          <div style={{ background: T.surface, borderRadius: 14, padding: 26, boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 18, background: T.surfaceAlt, borderRadius: 8, padding: 4 }}>
+              {[["signin", "Sign In"], ["activate", "Activate Invite"]].map(([m, label]) => (
+                <button key={m} onClick={() => setAuth(p => ({ ...p, mode: m }))} style={{ ...btnBase, flex: 1, justifyContent: "center", padding: "8px", fontSize: 12, background: a.mode === m ? T.navy : "transparent", color: a.mode === m ? T.white : T.textSecondary }}>{label}</button>
+              ))}
+            </div>
+            {a.mode === "signin" ? (
+              <div>
+                <label style={labelSm}>Username</label>
+                <input value={a.username} onChange={e => setAuth(p => ({ ...p, username: e.target.value }))} style={{ ...inp, marginBottom: 12 }} placeholder="username" />
+                <label style={labelSm}>Password</label>
+                <input type="password" value={a.password} onChange={e => setAuth(p => ({ ...p, password: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") signIn(); }} style={{ ...inp, marginBottom: 16 }} placeholder="password" />
+                <button onClick={signIn} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "12px", fontSize: 14 }}>{IC.Lock(15)} Sign In</button>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 14, textAlign: "center" }}>Setup admin — username <strong>admin</strong> / password <strong>admin</strong></div>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>Enter the email your invite was sent to, then choose a username and password.</p>
+                <label style={labelSm}>Invite Email</label>
+                <input value={a.email} onChange={e => setAuth(p => ({ ...p, email: e.target.value }))} style={{ ...inp, marginBottom: 12 }} placeholder="you@example.com" />
+                <label style={labelSm}>Choose a Username</label>
+                <input value={a.newUsername} onChange={e => setAuth(p => ({ ...p, newUsername: e.target.value }))} style={{ ...inp, marginBottom: 12 }} placeholder="username" />
+                <label style={labelSm}>Choose a Password</label>
+                <input type="password" value={a.newPassword} onChange={e => setAuth(p => ({ ...p, newPassword: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") activate(); }} style={{ ...inp, marginBottom: 16 }} placeholder="password" />
+                <button onClick={activate} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "12px", fontSize: 14 }}>{IC.Check(15)} Create Account &amp; Sign In</button>
+              </div>
+            )}
+          </div>
+        </div>
+        <Toast {...toast} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'DM Sans', sans-serif", color: T.text }}>
       <style>{FONTS}{`
@@ -592,24 +672,25 @@ export default function BurlingOnboarding() {
             <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
               <RolePill role={role} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: T.white, whiteSpace: "nowrap" }}>Jack Mullen</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.white, whiteSpace: "nowrap" }}>{session.name}</span>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            <span style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, lineHeight: 1.2, textAlign: "right" }}>Setup<br />view&nbsp;as</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              {["employee", "client", "compliance"].map(r => (
-                <button key={r} onClick={() => { setRole(r); setScreen("home"); setActiveOppId(null); }}
-                  style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", background: role === r ? "rgba(75,163,217,0.2)" : "transparent", color: role === r ? T.skyLight : "rgba(255,255,255,0.5)", border: `1px solid ${role === r ? "rgba(75,163,217,0.3)" : "transparent"}` }}>
-                  {r}
-                </button>
-              ))}
-              <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.15)", margin: "0 6px" }} />
-              <button onClick={() => { setRole("admin"); setScreen("home"); setActiveOppId(null); }}
-                style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", gap: 5, background: isAdmin ? "rgba(123,92,186,0.4)" : "rgba(255,255,255,0.08)", color: isAdmin ? "#DDD0F2" : "rgba(255,255,255,0.6)", border: `1px solid ${isAdmin ? "rgba(150,120,210,0.55)" : "rgba(255,255,255,0.12)"}` }}>
-                {IC.Lock(11)} Admin
-              </button>
-            </div>
+            {session.role === "admin" && (
+              <>
+                <span style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, lineHeight: 1.2, textAlign: "right" }}>Setup<br />view&nbsp;as</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {["employee", "client", "compliance", "admin"].map(r => (
+                    <button key={r} onClick={() => { setRole(r); setScreen("home"); setActiveOppId(null); }}
+                      style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", background: role === r ? "rgba(75,163,217,0.2)" : "transparent", color: role === r ? T.skyLight : "rgba(255,255,255,0.5)", border: `1px solid ${role === r ? "rgba(75,163,217,0.3)" : "transparent"}` }}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
+              </>
+            )}
+            <button onClick={logout} style={{ ...btnBase, padding: "5px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.12)" }}>Log Out</button>
           </div>
         </div>
       </div>
@@ -985,11 +1066,11 @@ export default function BurlingOnboarding() {
               <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 4 }}>Client Portal</div>
               <h1 style={{ fontSize: 22, fontFamily: "'Playfair Display', serif", marginBottom: 4 }}>Your Onboardings</h1>
             </div>
-            {opps.filter(o => o.sent).length === 0 ? (
+            {opps.filter(o => o.sent && (!realClient || o.id === session.oppId)).length === 0 ? (
               <Card><div style={{ padding: 40, textAlign: "center" }}><div style={{ fontSize: 32, marginBottom: 8 }}>📬</div><h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: T.navy, marginBottom: 4 }}>No Active Onboarding</h3><p style={{ fontSize: 13, color: T.textSecondary }}>You'll receive an email when your onboarding is ready.</p></div></Card>
             ) : (
               <Card>
-                {opps.filter(o => o.sent).map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+                {opps.filter(o => o.sent && (!realClient || o.id === session.oppId)).map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
               </Card>
             )}
           </div>
@@ -1125,6 +1206,7 @@ export default function BurlingOnboarding() {
                     <div style={{ fontSize: 10, color: T.textMuted }}>{u.email} · since {u.createdAt}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: u.activated ? T.success : T.warning }}>{u.activated ? "Active" : "Invited"}</span>
                     <RolePill role={u.role} />
                     {u.role !== "admin" && <button onClick={() => removeUser(u.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.danger }}>{IC.Trash()}</button>}
                   </div>
