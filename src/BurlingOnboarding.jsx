@@ -212,6 +212,8 @@ export default function BurlingOnboarding() {
   const isEmployee = role === "employee";
   const isAdmin = role === "admin";
   const isManager = isEmployee || isAdmin;
+  // From a manager's view, a not-yet-uploaded document is the client's action, not theirs.
+  const docBadge = (status) => (isManager && status === "action_needed") ? "awaiting_client" : status;
 
   // Update an opp in the array
   const updateOpp = (id, fn) => setOpps(prev => prev.map(o => o.id === id ? fn(o) : o));
@@ -450,7 +452,7 @@ export default function BurlingOnboarding() {
           <div><div style={{ fontSize: 12, fontWeight: 600 }}>{doc.name}</div><div style={{ fontSize: 10, color: T.textMuted }}>{doc.category}</div></div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <Badge status={doc.status} />
+          <Badge status={docBadge(doc.status)} />
           {doc.template && doc.status !== "approved" && <a href={doc.template} target="_blank" rel="noopener noreferrer" style={{ ...btnS, textDecoration: "none" }}>{IC.File(12)} Download &amp; Sign</a>}
           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc(field, doc.id); show("Signed document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
           {canReview && doc.status === "uploaded" && (<><button onClick={() => { approveDoc(field, doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc(field, doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
@@ -473,9 +475,11 @@ export default function BurlingOnboarding() {
       <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, padding: "0 24px", borderBottom: `2px solid ${T.sky}` }}>
         <div style={{ maxWidth: 1040, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 66, gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", minWidth: 0 }} onClick={goHome}>
-            <div style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg, ${T.sky}, #7CC4E8)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <span style={{ fontSize: 17, fontWeight: 800, color: T.navy }}>B</span>
-            </div>
+            <svg width="34" height="34" viewBox="0 0 48 48" fill="none" stroke={T.white} strokeWidth="2.2" style={{ flexShrink: 0 }}>
+              <circle cx="24" cy="24" r="20" />
+              <ellipse cx="18.5" cy="24" rx="8.5" ry="20" />
+              <ellipse cx="29.5" cy="24" rx="8.5" ry="20" />
+            </svg>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 9, color: T.skyLight, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 600 }}>Burling Bank</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: T.white, fontFamily: "'Playfair Display', serif", lineHeight: 1.1, whiteSpace: "nowrap" }}>Deposit Onboarding Module</div>
@@ -693,7 +697,7 @@ export default function BurlingOnboarding() {
                           <div><div style={{ fontSize: 12, fontWeight: 600 }}>{doc.name}</div><div style={{ fontSize: 10, color: T.textMuted }}>{doc.category}</div></div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                          <Badge status={doc.status} />
+                          <Badge status={docBadge(doc.status)} />
                           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc("clientDocs", doc.id); show("Document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
                           {isManager && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("clientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("clientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
                         </div>
@@ -712,7 +716,7 @@ export default function BurlingOnboarding() {
                           <div><div style={{ fontSize: 12, fontWeight: 600 }}>{doc.name}</div><div style={{ fontSize: 10, color: T.textMuted }}>{doc.category}</div></div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                          <Badge status={doc.status} />
+                          <Badge status={docBadge(doc.status)} />
                           {isClient && (doc.status === "action_needed" || doc.status === "rejected") && <button onClick={() => { uploadDoc("compClientDocs", doc.id); show("Document uploaded"); }} style={btnSky}>{IC.Upload(12)} Upload</button>}
                           {isManager && doc.status === "uploaded" && (<><button onClick={() => { approveDoc("compClientDocs", doc.id); show("Document approved"); }} style={{ ...btnS, color: T.success, background: T.successBg }}>{IC.Check(12)} Approve</button><button onClick={() => { rejectDoc("compClientDocs", doc.id); show("Document rejected"); }} style={btnDanger}>{IC.X(12)} Reject</button></>)}
                         </div>
@@ -723,7 +727,7 @@ export default function BurlingOnboarding() {
                 {activeOpp.bankDocs.length > 0 && (
                   <Card>
                     <CH icon={IC.Pen()} title="Forms to Download, Sign &amp; Return" accent={T.skyPale} right={<span style={{ fontSize: 10, color: T.textMuted }}>{activeOpp.bankDocs.filter(d => d.status === "approved").length}/{activeOpp.bankDocs.length} approved</span>} />
-                    {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download each form, sign it, then upload the signed copy. Signing takes place outside this app.</p></div>}
+                    {isClient && <div style={{ padding: "10px 20px", background: T.skyPale, borderBottom: `1px solid ${T.skyLight}` }}><p style={{ fontSize: 11, color: T.navy }}>Download each form, sign it, then upload the signed copy.</p></div>}
                     {activeOpp.bankDocs.map(doc => <SignRow key={doc.id} doc={doc} field="bankDocs" />)}
                   </Card>
                 )}
