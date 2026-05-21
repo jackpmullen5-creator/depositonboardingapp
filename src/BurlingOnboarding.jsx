@@ -493,9 +493,9 @@ export default function BurlingOnboarding() {
             </Card>
             {isHighComp && (
               <Card s={{ borderColor: T.compBorder }}>
-                <CH icon={IC.Lock()} title="Compliance Review Gate" accent={T.compBg} right={<Badge status={compReady ? "compliance_ready" : "pending_compliance"} />} />
+                <CH icon={IC.Lock()} title="Compliance Review Gate" accent={T.compBg} right={<Badge status={compReady ? "compliance_ready" : "action_needed"} />} />
                 <div style={{ padding: "16px 20px" }}>
-                  {wizComp === "pending_compliance" && <p style={{ fontSize: 12, color: T.compText }}>Waiting for Compliance to review. You can send this to the EDD queue now, or switch to the <strong>Compliance</strong> role to process it.</p>}
+                  {wizComp === "pending_compliance" && <p style={{ fontSize: 12, color: T.compText }}>This onboarding is flagged high compliance. Send it to the <strong>EDD queue</strong> below to begin Compliance review before it can go to the client.</p>}
                   {wizComp === "compliance_ready" && <p style={{ fontSize: 12, color: T.success, fontWeight: 600 }}>✓ Compliance approved. Welcome Packet uploaded{compDocRequests.length > 0 ? ` with ${compDocRequests.length} additional doc request${compDocRequests.length > 1 ? "s" : ""}` : ""}.</p>}
                   {wizComp === "no_packet" && <p style={{ fontSize: 12, color: T.textSecondary }}>Compliance: No packet needed. Reason: "{compExplanation}"</p>}
                 </div>
