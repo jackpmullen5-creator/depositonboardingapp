@@ -100,6 +100,10 @@ const RolePill = ({ role }) => {
   return <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ROLE_LABEL[role] || role}</span>;
 };
 
+const CompChip = ({ high }) => (
+  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", background: high ? T.compBg : T.surfaceAlt, color: high ? T.compText : T.textMuted, border: `1px solid ${high ? T.compBorder : T.border}` }}>{high ? "High Compliance" : "Standard"}</span>
+);
+
 const STATUS_MAP = {
   action_needed: { label: "Action Needed", bg: T.warningBg, color: T.warning },
   uploaded: { label: "Uploaded — Pending Review", bg: T.pendingBg, color: T.pending },
@@ -489,6 +493,11 @@ export default function BurlingOnboarding() {
     });
     logAudit(activeOppId, `Uploaded ${files.length} file${files.length > 1 ? "s" : ""} to "${docName(field, id)}"`);
   };
+  // TEMP testing override: mark a bucket uploaded with a placeholder, no real file. Remove before production.
+  const simulateUpload = (field, id) => {
+    updateOpp(activeOppId, o => ({ ...o, [field]: o[field].map(d => d.id === id ? { ...d, status: "uploaded", files: [...(d.files || []), { id: newId("f"), name: "Test_Document.pdf", url: "/docs/uploaded-document.pdf" }] } : d) }));
+    logAudit(activeOppId, `(test) Marked "${docName(field, id)}" uploaded`);
+  };
   const openUrl = (url) => {
     try {
       if (url && url.startsWith("data:")) {
@@ -655,7 +664,10 @@ export default function BurlingOnboarding() {
       <div onClick={onClick} className="doc-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 20px", borderBottom: `1px solid ${T.borderLight}`, cursor: "pointer" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{opp.client}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{opp.client}</span>
+              <CompChip high={opp.highCompliance === "Yes"} />
+            </div>
             <div style={{ fontSize: 11, color: T.navy, fontWeight: 500, marginTop: 1 }}>{stepText(opp)}</div>
             <div style={{ fontSize: 10, color: T.textMuted, marginTop: 1 }}>{opp.entity || opp.appType || "—"} · {opp.createdAt}</div>
           </div>
@@ -769,6 +781,7 @@ export default function BurlingOnboarding() {
               style={{ border: `1.5px dashed ${T.border}`, background: T.surfaceAlt, borderRadius: 8, padding: "10px 12px", textAlign: "center", cursor: "pointer", fontSize: 11, color: T.textSecondary }}>
               {IC.Upload(13)} {editing ? "Drag & drop to add or replace files, or click to browse" : "Drag & drop files here, or click to browse"}
             </div>
+            {needsUpload && <button onClick={() => simulateUpload(field, doc.id)} style={{ ...btnBase, marginTop: 6, padding: "4px 10px", fontSize: 10, background: "transparent", color: T.textMuted, border: `1px dashed ${T.border}` }}>⚡ Mark uploaded (test)</button>}
           </div>
         )}
       </div>
@@ -1004,7 +1017,10 @@ export default function BurlingOnboarding() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : isCompliance ? "Compliance View" : "Client Services View"}</div>
-                  <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+                    <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif" }}>{activeOpp.client}</h1>
+                    {!isClient && <CompChip high={activeOpp.highCompliance === "Yes"} />}
+                  </div>
                   <p style={{ fontSize: 11, opacity: 0.7 }}>{isClient && activeOpp.accountOpened ? "Account opened" : workflowStatus(activeOpp).text}</p>
                 </div>
                 {isManager && phase !== "complete" && !activeOpp.cancelled && (
@@ -1328,10 +1344,18 @@ export default function BurlingOnboarding() {
               <h1 style={{ fontSize: 18, fontFamily: "'Playfair Display', serif" }}>High Compliance Review</h1>
               <p style={{ fontSize: 11, opacity: 0.7 }}>Review flagged onboardings. Upload Welcome Packets and additional document requests.</p>
             </div>
-            <Card>
-              <CH icon={IC.File()} title="Currently Onboarding" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{currentlyOnboarding.length}</span>} />
-              {currentlyOnboarding.length === 0 ? <EmptyReport msg="No active onboardings" /> : currentlyOnboarding.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
-            </Card>
+            {(() => { const hc = currentlyOnboarding.filter(o => o.highCompliance === "Yes"); return (
+              <Card s={{ borderColor: T.compBorder }}>
+                <CH icon={IC.Lock()} title="High Compliance Onboardings" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText, fontWeight: 600 }}>{hc.length}</span>} />
+                {hc.length === 0 ? <EmptyReport msg="No active high compliance onboardings" /> : hc.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+              </Card>
+            ); })()}
+            {(() => { const std = currentlyOnboarding.filter(o => o.highCompliance !== "Yes"); return (
+              <Card>
+                <CH icon={IC.File()} title="Standard Onboardings" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{std.length}</span>} />
+                {std.length === 0 ? <EmptyReport msg="No active standard onboardings" /> : std.map(o => <OppRow key={o.id} opp={o} onClick={() => openOpp(o.id)} />)}
+              </Card>
+            ); })()}
             {wpPendingReview.length > 0 && (
               <Card s={{ borderColor: T.compBorder }}>
                 <CH icon={IC.Lock()} title="Welcome Packets — Pending Review" accent={T.compBg} right={<span style={{ fontSize: 10, color: T.compText, fontWeight: 600 }}>{wpPendingReview.length}</span>} />
