@@ -475,12 +475,7 @@ export default function BurlingOnboarding() {
       <div style={{ background: `linear-gradient(135deg, ${T.navy} 0%, ${T.navyMid} 100%)`, padding: "0 24px", borderBottom: `2px solid ${T.sky}` }}>
         <div style={{ maxWidth: 1040, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 66, gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 13, cursor: "pointer", minWidth: 0 }} onClick={goHome}>
-            <svg width="36" height="36" viewBox="0 0 48 48" fill="none" stroke={T.white} strokeWidth="2.1" style={{ flexShrink: 0 }}>
-              <circle cx="24" cy="24" r="20" />
-              <ellipse cx="18" cy="24" rx="9" ry="20" />
-              <ellipse cx="30" cy="24" rx="9" ry="20" />
-            </svg>
-            <span style={{ fontSize: 21, fontWeight: 700, color: T.white, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Burling Bank</span>
+            <img src="/burling-logo-white.png" alt="Burling Bank" style={{ height: 28, width: "auto", display: "block", flexShrink: 0 }} />
             <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
             <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap" }}>Deposit Onboarding Module</span>
             <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
