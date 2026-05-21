@@ -142,6 +142,7 @@ const getOppStage = (opp) => {
   if (!opp.sent && (opp.compStatus === "compliance_ready" || opp.compStatus === "no_packet")) return "ready_for_action";
   if (!opp.sent) return "configuring";
   if (!allApproved(initialDocsOf(opp))) return "documents";
+  if (!opp.advanced) return "ready_to_advance";
   if (!opp.sigCardSent) return "send_sig_card";
   if (!allApproved(opp.sigCardDocs || [])) return "signature_card";
   if (!opp.accountOpened) return "open_account";
@@ -185,6 +186,7 @@ export default function BurlingOnboarding() {
   const [uf, setUf] = useState({ name: "", email: "", role: "employee" });
   const [docLib, setDocLib] = useState(PROCESS_DOCS);
   const [docForm, setDocForm] = useState({ name: "", category: "Account Forms" });
+  const [commentDraft, setCommentDraft] = useState({});
 
   const [toast, setToast] = useState({ msg: "", visible: false });
   const toastTimer = useRef(null);
@@ -251,6 +253,8 @@ export default function BurlingOnboarding() {
       bankDocs: bDocs,
       compClientDocs: cDocs,
       welcomePacketDocs: wpDocs,
+      advanced: false,
+      comments: [],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -290,6 +294,8 @@ export default function BurlingOnboarding() {
       bankDocs: [],
       compClientDocs: [],
       welcomePacketDocs: [],
+      advanced: false,
+      comments: [],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -328,6 +334,8 @@ export default function BurlingOnboarding() {
       compClientDocs: cDocs,
       bankDocs: bDocs,
       welcomePacketDocs: wpDocs,
+      advanced: false,
+      comments: [],
       sigCardSent: false,
       sigCardDocs: [],
       accountOpened: false,
@@ -343,6 +351,17 @@ export default function BurlingOnboarding() {
   // Status update on an arbitrary opp (used by the compliance portal review surface)
   const setDocStatus = (oppId, field, docId, patch) => updateOpp(oppId, o => ({ ...o, [field]: o[field].map(d => d.id === docId ? { ...d, ...patch } : d) }));
 
+  const postComment = (id) => {
+    const text = (commentDraft[id] || "").trim();
+    if (!text) return;
+    updateOpp(id, o => ({ ...o, comments: [...(o.comments || []), { id: `c-${Date.now()}`, author: "Jack Mullen", role, text, date: new Date().toLocaleString() }] }));
+    setCommentDraft(p => ({ ...p, [id]: "" }));
+    show("Comment added");
+  };
+  const advanceToSigCard = (id) => {
+    updateOpp(id, o => ({ ...o, advanced: true }));
+    show("Advanced to signature card stage");
+  };
   const sendSigCard = (id) => {
     updateOpp(id, o => ({ ...o, sigCardSent: true, sigCardDocs: [sigCardDoc()], emails: [...o.emails, { type: "sent", subject: `Signature card sent to ${o.client}`, date: new Date().toLocaleDateString() }] }));
     show("Signature card sent to client");
@@ -376,7 +395,7 @@ export default function BurlingOnboarding() {
   // Filtered lists for home screen
   const currentlyOnboarding = opps.filter(o => {
     const stage = getOppStage(o);
-    return !o.onHold && ["documents", "send_sig_card", "signature_card", "open_account", "ready_for_action"].includes(stage);
+    return !o.onHold && ["documents", "ready_to_advance", "send_sig_card", "signature_card", "open_account", "ready_for_action"].includes(stage);
   });
   const pendingEDD = opps.filter(o => o.compStatus === "pending_compliance" && !o.onHold);
   const onHold = opps.filter(o => o.onHold);
@@ -387,6 +406,7 @@ export default function BurlingOnboarding() {
   const sigCardApproved = activeOpp ? allApproved(activeOpp.sigCardDocs || []) : false;
   const phase = !activeOpp?.sent ? "none"
     : !allInitialApproved ? "documents"
+    : !activeOpp.advanced ? "ready_to_advance"
     : !activeOpp.sigCardSent ? "send_sig_card"
     : !sigCardApproved ? "signature_card"
     : !activeOpp.accountOpened ? "open_account"
@@ -415,7 +435,7 @@ export default function BurlingOnboarding() {
     let rowStatus;
     if (stage === "on_hold") rowStatus = "on_hold";
     else if (stage === "pending_compliance") rowStatus = "pending_compliance";
-    else if (stage === "ready_for_action" || stage === "send_sig_card" || stage === "open_account") rowStatus = "ready_for_action";
+    else if (stage === "ready_for_action" || stage === "ready_to_advance" || stage === "send_sig_card" || stage === "open_account") rowStatus = "ready_for_action";
     else if (stage === "complete") rowStatus = "approved";
     else if (stage === "signature_card") rowStatus = (opp.sigCardDocs || []).some(d => d.status === "uploaded") ? "review_needed" : "awaiting_client";
     else rowStatus = (bucketsFull(allDocs) && allDocs.some(d => d.status === "uploaded")) ? "review_needed" : "awaiting_client";
@@ -441,6 +461,35 @@ export default function BurlingOnboarding() {
       <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>{msg}</p>
     </div>
   );
+
+  // Internal comment thread — visible to employees, compliance, and admin (never the client)
+  const CommentThread = ({ opp }) => {
+    const list = opp.comments || [];
+    const draft = commentDraft[opp.id] || "";
+    return (
+      <Card>
+        <CH icon={IC.Mail()} title="Internal Comments" right={<span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>{list.length}</span>} />
+        <div style={{ padding: "8px 20px", background: T.warningBg, borderBottom: `1px solid ${T.borderLight}` }}>
+          <span style={{ fontSize: 10, color: T.warning, fontWeight: 600 }}>Internal only — not visible to the client.</span>
+        </div>
+        {list.length === 0 && <EmptyReport msg="No internal comments yet." />}
+        {list.map(c => (
+          <div key={c.id} style={{ padding: "10px 20px", borderBottom: `1px solid ${T.borderLight}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <RolePill role={c.role} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{c.author}</span>
+              <span style={{ fontSize: 10, color: T.textMuted }}>{c.date}</span>
+            </div>
+            <div style={{ fontSize: 12, color: T.textSecondary, whiteSpace: "pre-wrap" }}>{c.text}</div>
+          </div>
+        ))}
+        <div style={{ padding: "12px 20px", display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <textarea value={draft} onChange={e => setCommentDraft(p => ({ ...p, [opp.id]: e.target.value }))} style={{ ...inp, minHeight: 38, resize: "vertical", flex: 1 }} placeholder="Add an internal comment…" />
+          <button onClick={() => postComment(opp.id)} disabled={!draft.trim()} style={{ ...btnPri, padding: "9px 16px", opacity: draft.trim() ? 1 : 0.4 }}>{IC.Send(12)} Post</button>
+        </div>
+      </Card>
+    );
+  };
 
   // Row for a download-sign-upload document (forms, signature card, welcome packet)
   const SignRow = ({ doc, field, reviewer = "employee" }) => {
@@ -620,7 +669,7 @@ export default function BurlingOnboarding() {
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.5, marginBottom: 2 }}>{isClient ? "Client Portal" : isAdmin ? "Admin View" : "Employee View"}</div>
                   <h1 style={{ fontSize: 20, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{activeOpp.client}</h1>
-                  <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : phase === "documents" ? "Document collection in progress" : phase === "send_sig_card" ? "Documents approved — send signature card" : phase === "signature_card" ? "Awaiting signed signature card" : phase === "open_account" ? "Ready to open account" : phase === "complete" ? "Account opened — onboarding complete" : "Pending"}</p>
+                  <p style={{ fontSize: 11, opacity: 0.7 }}>{activeOpp.onHold ? "On Hold" : !activeOpp.sent && (activeOpp.compStatus === "compliance_ready" || activeOpp.compStatus === "no_packet") ? "Ready for Action — Send to Client" : !activeOpp.sent ? "Pending Compliance Review" : phase === "documents" ? "Document collection in progress" : phase === "ready_to_advance" ? "All documents approved — ready to advance" : phase === "send_sig_card" ? "Deposit and send the signature card" : phase === "signature_card" ? "Awaiting signed signature card" : phase === "open_account" ? "Ready to open account" : phase === "complete" ? "Account opened — onboarding complete" : "Pending"}</p>
                 </div>
                 {isManager && activeOpp.sent && phase !== "complete" && (
                   <button onClick={() => toggleHold(activeOpp.id)} style={{ ...btnBase, padding: "6px 14px", fontSize: 10, background: activeOpp.onHold ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.1)", color: T.white, border: "1px solid rgba(255,255,255,0.2)" }}>
@@ -671,12 +720,14 @@ export default function BurlingOnboarding() {
               </Card>
             )}
 
+            {isManager && <CommentThread opp={activeOpp} />}
+
             {activeOpp.sent && (
               <>
                 <Card>
                   <div style={{ padding: "14px 20px", display: "flex", gap: 8 }}>
                     {["Documents", "Signature Card", "Open Account"].map((label, i) => {
-                      const stageIdx = phase === "documents" ? 0 : (phase === "send_sig_card" || phase === "signature_card") ? 1 : 2;
+                      const stageIdx = (phase === "documents" || phase === "ready_to_advance") ? 0 : (phase === "send_sig_card" || phase === "signature_card") ? 1 : 2;
                       return (<div key={label} style={{ flex: 1, textAlign: "center" }}><div style={{ height: 4, borderRadius: 2, background: i <= stageIdx ? T.sky : T.surfaceAlt, marginBottom: 6 }} /><span style={{ fontSize: 10, fontWeight: 600, color: i <= stageIdx ? T.navy : T.textMuted }}>{label}</span></div>);
                     })}
                   </div>
@@ -733,13 +784,26 @@ export default function BurlingOnboarding() {
                   </Card>
                 )}
 
+                {phase === "ready_to_advance" && (
+                  <Card s={{ borderColor: "#B8D4A8" }}>
+                    <CH icon={IC.Check()} title="All Documents Approved" accent="#E8F5E9" />
+                    <div style={{ padding: "18px 20px" }}>
+                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>All documents for <strong>{activeOpp.client}</strong> have been approved by your team. Advance to the signature card stage when ready.</p>
+                      {isManager ? (
+                        <button onClick={() => advanceToSigCard(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Arrow(16)} Advance to Signature Card</button>
+                      ) : (
+                        <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>All your documents have been approved. Your banker will continue the process.</p>
+                      )}
+                    </div>
+                  </Card>
+                )}
                 {phase === "send_sig_card" && (
                   <Card s={{ borderColor: "#B8D4A8" }}>
-                    <CH icon={IC.Check()} title="Send Signature Card" accent="#E8F5E9" />
+                    <CH icon={IC.Check()} title="Deposit &amp; Send Signature Card" accent="#E8F5E9" />
                     <div style={{ padding: "18px 20px" }}>
-                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>All initial documents for <strong>{activeOpp.client}</strong> have been approved. Send the signature card for the client to sign and return.</p>
+                      <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>Deposit the signature card and send it to <strong>{activeOpp.client}</strong> to sign and return.</p>
                       {isManager ? (
-                        <button onClick={() => sendSigCard(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Send(16)} Send Signature Card to {activeOpp.client}</button>
+                        <button onClick={() => sendSigCard(activeOpp.id)} style={{ ...btnPri, width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}>{IC.Send(16)} Deposit and Send Signature Card to {activeOpp.client}</button>
                       ) : (
                         <p style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>Waiting for your banker to send the signature card.</p>
                       )}
@@ -827,7 +891,8 @@ export default function BurlingOnboarding() {
               <Card><div style={{ padding: 32, textAlign: "center" }}><div style={{ fontSize: 28, marginBottom: 6 }}>📋</div><h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: T.navy, marginBottom: 4 }}>No Pending Requests</h3><p style={{ fontSize: 12, color: T.textMuted }}>You'll be notified when a high compliance review is needed.</p></div></Card>
             ) : (
               pendingEDD.map(opp => (
-                <Card key={opp.id} s={{ borderColor: T.compBorder }}>
+                <div key={opp.id}>
+                <Card s={{ borderColor: T.compBorder }}>
                   <CH icon={IC.Lock()} title={`Review: ${opp.client}`} accent={T.compBg} right={<Badge status="pending_compliance" />} />
                   <div style={{ padding: "18px 20px" }}>
                     <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 16 }}>An employee has flagged <strong>{opp.client}</strong> as high compliance. Choose an option below:</p>
@@ -862,6 +927,8 @@ export default function BurlingOnboarding() {
                     </div>
                   </div>
                 </Card>
+                <CommentThread opp={opp} />
+                </div>
               ))
             )}
           </div>
